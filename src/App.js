@@ -1,24 +1,78 @@
-import logo from './logo.svg';
-import './App.css';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import { Box } from '@mui/material';
+import Navigation from './components/Navigation';
+import Dashboard from './components/Dashboard';
+import DailySales from './components/DailySales';
+import CustomerList from './components/CustomerList';
+import Products from './components/Products';
+import { CustomThemeProvider, useThemeContext } from './contexts/ThemeContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import Login from './components/auth/Login';
+import SignUp from './components/auth/SignUp';
+
+const PrivateRoute = ({ children }) => {
+  const { user } = useAuth();
+  return user ? children : <Navigate to="/login" />;
+};
+
+function AppContent() {
+  const { theme } = useThemeContext();
+
+  return (
+    <MuiThemeProvider theme={theme}>
+      <CssBaseline />
+      <Router>
+        <Box sx={{ display: 'flex', minHeight: '100vh' }}>
+          {/* Only show Navigation for authenticated routes */}
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<SignUp />} />
+            <Route
+              path="/*"
+              element={
+                <PrivateRoute>
+                  <>
+                    <Navigation />
+                    <Box
+                      component="main"
+                      sx={{
+                        flexGrow: 1,
+                        p: 3,
+                        width: '100%',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        mt: { xs: 8, sm: 9 },
+                      }}
+                    >
+                      <Routes>
+                        <Route path="/" element={<Dashboard />} />
+                        <Route path="/sales" element={<DailySales />} />
+                        <Route path="/customers" element={<CustomerList />} />
+                        <Route path="/products" element={<Products />} />
+                      </Routes>
+                    </Box>
+                  </>
+                </PrivateRoute>
+              }
+            />
+          </Routes>
+        </Box>
+      </Router>
+    </MuiThemeProvider>
+  );
+}
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <AuthProvider>
+      <CustomThemeProvider>
+        <AppContent />
+      </CustomThemeProvider>
+    </AuthProvider>
   );
 }
 
