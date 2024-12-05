@@ -27,6 +27,7 @@ import {
   Close as CloseIcon,
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
+  LocalShipping as LocalShippingIcon,
 } from '@mui/icons-material';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useThemeContext } from '../contexts/ThemeContext';
@@ -61,6 +62,7 @@ const Navigation = () => {
     { text: 'Daily Sales', icon: <SaleIcon />, path: '/sales' },
     { text: 'Customers', icon: <PeopleIcon />, path: '/customers' },
     { text: 'Products', icon: <ProductsIcon />, path: '/products' },
+    { text: 'Delivery Companies', icon: <LocalShippingIcon />, path: '/delivery-companies' }
   ];
 
   const drawer = (
@@ -86,7 +88,7 @@ const Navigation = () => {
           fontSize: '1.2rem',
           fontWeight: 700,
         }}>
-          Sales Portal
+          Danil Shampoo
         </Typography>
       </Box>
       

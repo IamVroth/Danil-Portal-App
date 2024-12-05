@@ -1,13 +1,14 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { ThemeProvider as MuiThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import { Box } from '@mui/material';
+import { Box, AppBar, Toolbar, Typography, Button } from '@mui/material';
 import Navigation from './components/Navigation';
 import Dashboard from './components/Dashboard';
 import DailySales from './components/DailySales';
 import CustomerList from './components/CustomerList';
 import Products from './components/Products';
+import DeliveryCompanies from './components/DeliveryCompanies';
 import { CustomThemeProvider, useThemeContext } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/auth/Login';
@@ -53,6 +54,7 @@ function AppContent() {
                         <Route path="/sales" element={<DailySales />} />
                         <Route path="/customers" element={<CustomerList />} />
                         <Route path="/products" element={<Products />} />
+                        <Route path="/delivery-companies" element={<DeliveryCompanies />} />
                       </Routes>
                     </Box>
                   </>
