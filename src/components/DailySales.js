@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Paper,
   Typography,
@@ -26,7 +26,6 @@ import {
   Select,
   Snackbar,
   Alert,
-  Chip,
   Divider,
   InputAdornment,
 } from '@mui/material';
@@ -149,8 +148,50 @@ function DailySales() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
+  // Memoize fetchSales to prevent unnecessary re-renders
+  const memoizedFetchSales = useCallback(async () => {
+    try {
+      let query = supabase
+        .from('sales')
+        .select(`
+          *,
+          customers!inner (
+            id,
+            name,
+            location
+          ),
+          products!inner (
+            id,
+            name,
+            unit_price
+          )
+        `)
+        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', dateRange.endDate.format('YYYY-MM-DD'))
+        .order('date', { ascending: false });
+
+      if (selectedLocation) {
+        query = query.eq('customers.location', selectedLocation);
+      }
+
+      const { data, error } = await query;
+
+      if (error) throw error;
+
+      setSales(data || []);
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching sales:', error.message);
+      showSnackbar(error.message, 'error');
+      setLoading(false);
+    }
+  }, [dateRange.startDate, dateRange.endDate, selectedLocation]);
+
   useEffect(() => {
-    fetchSales();
+    memoizedFetchSales();
+  }, [memoizedFetchSales]);
+
+  useEffect(() => {
     fetchCustomers();
     fetchProducts();
     fetchDeliveryCompanies();
@@ -173,65 +214,6 @@ function DailySales() {
       setLocations(uniqueLocations);
     } catch (error) {
       console.error('Error fetching locations:', error.message);
-    }
-  };
-
-  const fetchSales = async () => {
-    try {
-      let query = supabase
-        .from('sales')
-        .select(`
-          *,
-          customers!inner (
-            id,
-            name,
-            location
-          ),
-          products!inner (
-            id,
-            name,
-            unit_price
-          )
-        `)
-        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
-        .lte('date', dateRange.endDate.format('YYYY-MM-DD'))
-        .order('date', { ascending: false });
-
-      if (selectedLocation) {
-        // First get customer IDs for the selected location
-        const { data: customerData, error: customerError } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('location', selectedLocation);
-
-        if (customerError) throw customerError;
-
-        if (customerData && customerData.length > 0) {
-          const customerIds = customerData.map(c => c.id);
-          query = query.in('customer_id', customerIds);
-        } else {
-          // If no customers found for location, return empty result
-          setSales([]);
-          return;
-        }
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      // Transform the data to handle relationships correctly
-      const transformedData = (data || []).map(sale => ({
-        ...sale,
-        customer: sale.customers || { name: 'Unknown Customer', location: 'Unknown Location' },
-        product: sale.products || { name: 'Unknown Product', unit_price: 0 }
-      }));
-
-      setSales(transformedData);
-    } catch (error) {
-      console.error('Error fetching sales:', error.message);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -312,116 +294,93 @@ function DailySales() {
     setDateRange({ startDate, endDate });
   };
 
-  // Add effect to refetch sales when filters change
   useEffect(() => {
-    fetchSales();
+    memoizedFetchSales();
   }, [dateRange.startDate, dateRange.endDate, selectedLocation]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log('Submitting form...', saleData); // Debug log
+    console.log('Submitting form...', editingId ? editedSale : saleData);
     
     try {
-      if (!saleData.customer_id || !saleData.product_id || !saleData.quantity || !saleData.unit_price) {
+      const formData = editingId ? editedSale : saleData;
+      
+      if (!formData.customer_id || !formData.product_id || !formData.quantity || !formData.unit_price) {
         showSnackbar('Please fill in all required fields', 'error');
         return;
       }
 
       const now = new Date().toISOString();
-      const subtotal = Number(saleData.quantity) * Number(saleData.unit_price);
+      const subtotal = Number(formData.quantity) * Number(formData.unit_price);
       
       // Calculate discount
       let discountAmount = 0;
-      if (saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE) {
-        discountAmount = (subtotal * Number(saleData.discount_value)) / 100;
-      } else if (saleData.discount_type === DISCOUNT_TYPES.FIXED) {
-        discountAmount = Number(saleData.discount_value);
+      if (formData.discount_type === DISCOUNT_TYPES.PERCENTAGE) {
+        discountAmount = (subtotal * Number(formData.discount_value)) / 100;
+      } else if (formData.discount_type === DISCOUNT_TYPES.FIXED) {
+        discountAmount = Number(formData.discount_value);
       }
 
       // Calculate delivery charge
-      const deliveryCharge = saleData.is_promotional ? 0 : Number(saleData.delivery_charge);
+      const deliveryCharge = formData.is_promotional ? 0 : Number(formData.delivery_charge);
       
       // Calculate final total
       const total = subtotal - discountAmount + deliveryCharge;
 
-      console.log('Inserting sale with data:', {
-        date: saleData.date.format('YYYY-MM-DD'),
-        customer_id: saleData.customer_id,
-        product_id: saleData.product_id,
-        quantity: Number(saleData.quantity),
-        unit_price: Number(saleData.unit_price),
-        has_delivery: saleData.has_delivery,
+      const saleRecord = {
+        date: formData.date.format('YYYY-MM-DD'),
+        customer_id: formData.customer_id,
+        product_id: formData.product_id,
+        quantity: Number(formData.quantity),
+        unit_price: Number(formData.unit_price),
+        has_delivery: formData.has_delivery,
         delivery_charge: deliveryCharge,
-        delivery_cost: saleData.has_delivery ? Number(saleData.delivery_cost) : 0,
-        is_promotional: saleData.is_promotional,
-        delivery_status: saleData.has_delivery ? DELIVERY_STATUSES.PENDING : null,
-        delivery_notes: saleData.delivery_notes || null,
-        delivery_company: saleData.has_delivery ? saleData.delivery_company : null,
-        delivery_updated_at: saleData.has_delivery ? now : null,
-        discount_type: saleData.discount_type,
-        discount_value: Number(saleData.discount_value),
+        delivery_cost: formData.has_delivery ? Number(formData.delivery_cost) : 0,
+        is_promotional: formData.is_promotional,
+        delivery_status: formData.has_delivery ? DELIVERY_STATUSES.PENDING : null,
+        delivery_notes: formData.delivery_notes || null,
+        delivery_company: formData.has_delivery ? formData.delivery_company : null,
+        delivery_updated_at: formData.has_delivery ? now : null,
+        discount_type: formData.discount_type || null,
+        discount_value: formData.discount_type ? Number(formData.discount_value) : 0,
         payment_status: 'paid'
-      }); // Debug log
+      };
 
-      // Insert the new sale
-      const { data: newSale, error: insertError } = await supabase
-        .from('sales')
-        .insert([{
-          date: saleData.date.format('YYYY-MM-DD'),
-          customer_id: saleData.customer_id,
-          product_id: saleData.product_id,
-          quantity: Number(saleData.quantity),
-          unit_price: Number(saleData.unit_price),
-          has_delivery: saleData.has_delivery,
-          delivery_charge: deliveryCharge,
-          delivery_cost: saleData.has_delivery ? Number(saleData.delivery_cost) : 0,
-          is_promotional: saleData.is_promotional,
-          delivery_status: saleData.has_delivery ? DELIVERY_STATUSES.PENDING : null,
-          delivery_notes: saleData.delivery_notes || null,
-          delivery_company: saleData.has_delivery ? saleData.delivery_company : null,
-          delivery_updated_at: saleData.has_delivery ? now : null,
-          discount_type: saleData.discount_type || null,
-          discount_value: saleData.discount_type ? Number(saleData.discount_value) : 0,
-          payment_status: 'paid'
-        }])
-        .select();
+      let result;
+      if (editingId) {
+        // Update existing sale
+        const { data: updatedSale, error: updateError } = await supabase
+          .from('sales')
+          .update(saleRecord)
+          .eq('id', editingId)
+          .select();
 
-      if (insertError) {
-        console.error('Insert error:', insertError); // Debug log
-        throw insertError;
+        if (updateError) throw updateError;
+        result = updatedSale;
+        showSnackbar('Sale updated successfully', 'success');
+      } else {
+        // Insert new sale
+        const { data: newSale, error: insertError } = await supabase
+          .from('sales')
+          .insert([saleRecord])
+          .select();
+
+        if (insertError) throw insertError;
+        result = newSale;
+        showSnackbar('Sale created successfully', 'success');
       }
 
-      console.log('Sale inserted successfully:', newSale); // Debug log
-
-      // Fetch the complete sale data with customer and product information
-      const { data: completeData, error: fetchError } = await supabase
-        .from('sales')
-        .select(`
-          *,
-          customers(name),
-          products(name, unit_price)
-        `)
-        .eq('id', newSale[0].id)
-        .single();
-
-      if (fetchError) {
-        console.error('Fetch error:', fetchError); // Debug log
-        throw fetchError;
-      }
-
-      console.log('Complete sale data fetched:', completeData); // Debug log
+      // Fetch updated sales list
+      await memoizedFetchSales();
       
-      // Add the complete sale data to the list
-      setSales([completeData, ...sales]);
-      
-      // Reset the form and close dialog
+      // Reset form
+      setEditingId(null);
+      setEditedSale({});
       setSaleData(initialSaleData);
       setOpenNewDialog(false);
       
-      // Show success message
-      showSnackbar('Sale added successfully', 'success');
     } catch (error) {
-      console.error('Error adding sale:', error); // Debug log
+      console.error('Error:', error);
       showSnackbar(error.message, 'error');
     }
   };
@@ -601,11 +560,14 @@ function DailySales() {
       discount_value: sale.discount_value || 0,
       payment_status: sale.payment_status || 'paid'
     });
+    setOpenNewDialog(true);
   };
 
   const handleCancel = () => {
     setEditingId(null);
     setEditedSale({});
+    setSaleData(initialSaleData);
+    setOpenNewDialog(false);
   };
 
   const handleFieldChange = (field, value) => {
@@ -631,7 +593,7 @@ function DailySales() {
       if (error) throw error;
       
       setEditingId(null);
-      fetchSales(); // Refresh the list to get the computed total_amount
+      await memoizedFetchSales(); // Refresh the list to get the computed total_amount
     } catch (error) {
       console.error('Error updating sale:', error.message);
     }
@@ -698,32 +660,72 @@ function DailySales() {
     const total = (sale.quantity * sale.unit_price) - (sale.discount_value || 0);
     
     return (
-      <Grid container spacing={1}>
+      <Grid container spacing={2}>
         <Grid item xs={12}>
-          <Typography variant="subtitle2" color="text.secondary">
+          <Typography 
+            variant="subtitle2" 
+            color="text.secondary"
+            sx={{ fontSize: 'calc(12px + 0.5vw)' }}
+          >
             Date: {dayjs(sale.date).format('YYYY-MM-DD')}
           </Typography>
         </Grid>
-        <Grid item xs={12}>
-          <Typography variant="subtitle1" fontWeight="bold">
-            {sale.customer?.name}
-          </Typography>
+        <Grid item container xs={12} alignItems="center">
+          <Grid item xs={6}>
+            <Typography 
+              variant="subtitle1" 
+              fontWeight="bold"
+              sx={{ fontSize: 'calc(16px + 0.5vw)' }}
+            >
+              {sale.customer?.name}
+            </Typography>
+          </Grid>
+          <Grid item xs={6}>
+            <Typography 
+              variant="subtitle1"
+              sx={{ fontSize: 'calc(14px + 0.5vw)' }}
+            >
+              {sale.product?.name}
+            </Typography>
+          </Grid>
         </Grid>
-        <Grid item xs={6}>
-          <Typography variant="body2" color="text.secondary">
-            Product
-          </Typography>
-          <Typography variant="body1" noWrap>
-            {sale.product?.name}
-          </Typography>
-        </Grid>
-        <Grid item xs={6}>
-          <Typography variant="body2" color="text.secondary">
-            Total
-          </Typography>
-          <Typography variant="body1" fontWeight="bold" color="primary">
-            ${(sale.total || 0).toFixed(2)}
-          </Typography>
+        <Grid item container xs={12} alignItems="center">
+          <Grid item xs={6}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                sx={{ fontSize: 'calc(12px + 0.5vw)' }}
+              >
+                Qty:
+              </Typography>
+              <Typography 
+                variant="body1"
+                sx={{ fontSize: 'calc(14px + 0.5vw)' }}
+              >
+                {sale.quantity}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6}>
+            <Typography 
+              variant="body1" 
+              fontWeight="bold" 
+              color="primary"
+              sx={{ fontSize: 'calc(14px + 0.5vw)' }}
+            >
+              ${(() => {
+                const subtotal = sale.quantity * sale.unit_price;
+                const discount = sale.discount_type === DISCOUNT_TYPES.PERCENTAGE
+                  ? (subtotal * sale.discount_value) / 100
+                  : (sale.discount_value || 0);
+                const deliveryCharge = sale.has_delivery && !sale.is_promotional
+                  ? (sale.delivery_charge || 0)
+                  : 0;
+                return (subtotal - discount + deliveryCharge).toFixed(2);
+              })()}
+            </Typography>
+          </Grid>
         </Grid>
         <Grid item xs={12}>
           <Grid container spacing={2}>
@@ -731,11 +733,15 @@ function DailySales() {
               <Box sx={{ 
                 display: 'flex', 
                 alignItems: 'center',
-                gap: 0.5,
+                gap: 1,
                 color: 'text.secondary',
               }}>
-                <PhoneIcon sx={{ fontSize: 16 }} />
-                <Typography variant="body2" noWrap>
+                <PhoneIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
+                <Typography 
+                  variant="body2" 
+                  noWrap
+                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
+                >
                   {sale.customer?.phone || 'N/A'}
                 </Typography>
               </Box>
@@ -744,11 +750,15 @@ function DailySales() {
               <Box sx={{ 
                 display: 'flex', 
                 alignItems: 'center',
-                gap: 0.5,
+                gap: 1,
                 color: 'text.secondary',
               }}>
-                <LocationOnIcon sx={{ fontSize: 16 }} />
-                <Typography variant="body2" noWrap>
+                <LocationOnIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
+                <Typography 
+                  variant="body2" 
+                  noWrap
+                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
+                >
                   {sale.customer?.location || 'N/A'}
                 </Typography>
               </Box>
@@ -783,17 +793,13 @@ function DailySales() {
         // Mobile View
         <Box sx={{ 
           width: '100vw',
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
+          height: '100vh',
           position: 'fixed',
           top: 0,
           left: 0,
           backgroundColor: 'background.default',
           pt: '64px', // Height of the app bar
-          pb: 2,
-          overflowY: 'auto'
+          overflowY: 'auto' // Make the entire container scrollable
         }}>
           <Box sx={{
             width: '90vw',
@@ -802,13 +808,15 @@ function DailySales() {
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
+            pb: 4
           }}>
+            {/* Title */}
             <Typography 
-              variant="h5" 
+              variant="h4" 
               sx={{ 
                 my: 2, 
                 textAlign: 'center',
-                fontSize: 'calc(20px + 1vw)',
+                fontSize: 'calc(28px + 1vw)',
                 fontWeight: 'bold'
               }}
             >
@@ -818,15 +826,15 @@ function DailySales() {
             {/* Action Buttons Container */}
             <Box sx={{ 
               display: 'flex', 
-              gap: '3vw', 
+              gap: 2, 
               justifyContent: 'center',
               width: '100%',
               mb: 3
             }}>
               <IconButton
                 sx={{
-                  width: 'calc(60px + 5vw)',
-                  height: 'calc(60px + 5vw)',
+                  width: '50px',
+                  height: '50px',
                   borderRadius: '12px',
                   backgroundColor: 'primary.main',
                   color: 'white',
@@ -836,12 +844,12 @@ function DailySales() {
                 }}
                 onClick={() => setOpenNewDialog(true)}
               >
-                <AddIcon sx={{ fontSize: 'calc(24px + 2vw)' }} />
+                <AddIcon sx={{ fontSize: '24px' }} />
               </IconButton>
               <IconButton
                 sx={{
-                  width: 'calc(60px + 5vw)',
-                  height: 'calc(60px + 5vw)',
+                  width: '50px',
+                  height: '50px',
                   borderRadius: '12px',
                   backgroundColor: 'secondary.main',
                   color: 'white',
@@ -851,12 +859,12 @@ function DailySales() {
                 }}
                 onClick={handleOpenCustomerDialog}
               >
-                <PersonAddIcon sx={{ fontSize: 'calc(24px + 2vw)' }} />
+                <PersonAddIcon sx={{ fontSize: '24px' }} />
               </IconButton>
               <IconButton
                 sx={{
-                  width: 'calc(60px + 5vw)',
-                  height: 'calc(60px + 5vw)',
+                  width: '50px',
+                  height: '50px',
                   borderRadius: '12px',
                   backgroundColor: 'info.main',
                   color: 'white',
@@ -866,16 +874,13 @@ function DailySales() {
                 }}
                 onClick={handleOpenProductDialog}
               >
-                <AddBusinessIcon sx={{ fontSize: 'calc(24px + 2vw)' }} />
+                <AddBusinessIcon sx={{ fontSize: '24px' }} />
               </IconButton>
             </Box>
 
             {/* Filters Container */}
             <Box sx={{ 
               width: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
               mb: 3
             }}>
               <FormControl fullWidth sx={{ mb: 2 }}>
@@ -925,123 +930,30 @@ function DailySales() {
             {/* Sales List Container */}
             <Box sx={{ 
               width: '100%',
-              flex: 1,
               display: 'flex',
               flexDirection: 'column',
               gap: 2
             }}>
               {filteredSales.length > 0 ? (
-                filteredSales
-                  .slice(page * rowsPerPage, (page + 1) * rowsPerPage)
-                  .map((sale) => (
-                    <Paper
-                      key={sale.id}
-                      elevation={1}
-                      sx={{
-                        p: '4vw',
-                        width: '100%',
-                        backgroundColor: 'background.paper',
-                        cursor: 'pointer',
-                        borderRadius: 2,
-                        '&:hover': {
-                          backgroundColor: 'action.hover',
-                        },
-                      }}
-                      onClick={() => handleRowClick(sale)}
-                    >
-                      <Grid container spacing={2}>
-                        <Grid item xs={12}>
-                          <Typography 
-                            variant="subtitle2" 
-                            color="text.secondary"
-                            sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                          >
-                            Date: {dayjs(sale.date).format('YYYY-MM-DD')}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={12}>
-                          <Typography 
-                            variant="subtitle1" 
-                            fontWeight="bold"
-                            sx={{ fontSize: 'calc(16px + 0.5vw)' }}
-                          >
-                            {sale.customer?.name}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={6}>
-                          <Typography 
-                            variant="body2" 
-                            color="text.secondary"
-                            sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                          >
-                            Product
-                          </Typography>
-                          <Typography 
-                            variant="body1" 
-                            noWrap
-                            sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-                          >
-                            {sale.product?.name}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={6}>
-                          <Typography 
-                            variant="body2" 
-                            color="text.secondary"
-                            sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                          >
-                            Total
-                          </Typography>
-                          <Typography 
-                            variant="body1" 
-                            fontWeight="bold" 
-                            color="primary"
-                            sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-                          >
-                            ${(sale.total || 0).toFixed(2)}
-                          </Typography>
-                        </Grid>
-                        <Grid item xs={12}>
-                          <Grid container spacing={2}>
-                            <Grid item xs={6}>
-                              <Box sx={{ 
-                                display: 'flex', 
-                                alignItems: 'center',
-                                gap: 1,
-                                color: 'text.secondary',
-                              }}>
-                                <PhoneIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
-                                <Typography 
-                                  variant="body2" 
-                                  noWrap
-                                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                                >
-                                  {sale.customer?.phone || 'N/A'}
-                                </Typography>
-                              </Box>
-                            </Grid>
-                            <Grid item xs={6}>
-                              <Box sx={{ 
-                                display: 'flex', 
-                                alignItems: 'center',
-                                gap: 1,
-                                color: 'text.secondary',
-                              }}>
-                                <LocationOnIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
-                                <Typography 
-                                  variant="body2" 
-                                  noWrap
-                                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                                >
-                                  {sale.customer?.location || 'N/A'}
-                                </Typography>
-                              </Box>
-                            </Grid>
-                          </Grid>
-                        </Grid>
-                      </Grid>
-                    </Paper>
-                  ))
+                filteredSales.map((sale) => (
+                  <Paper
+                    key={sale.id}
+                    elevation={1}
+                    sx={{
+                      p: '4vw',
+                      width: '100%',
+                      backgroundColor: 'background.paper',
+                      cursor: 'pointer',
+                      borderRadius: 2,
+                      '&:hover': {
+                        backgroundColor: 'action.hover',
+                      },
+                    }}
+                    onClick={() => handleRowClick(sale)}
+                  >
+                    <MobileListItem sale={sale} />
+                  </Paper>
+                ))
               ) : (
                 <Paper
                   elevation={1}
@@ -1062,95 +974,46 @@ function DailySales() {
                 </Paper>
               )}
             </Box>
-
-            {/* Pagination Controls */}
-            <Box sx={{ 
-              width: '100%',
-              display: 'flex', 
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: 2,
-              mt: 3,
-              mb: 2
-            }}>
-              <TablePagination
-                component="div"
-                count={filteredSales.length}
-                page={page}
-                onPageChange={(e, newPage) => setPage(newPage)}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(e) => {
-                  setRowsPerPage(parseInt(e.target.value, 10));
-                  setPage(0);
-                }}
-                sx={{
-                  '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                    [theme.breakpoints.down('sm')]: {
-                      display: 'none',
-                    },
-                  },
-                  '.MuiTablePagination-select': {
-                    fontSize: 'calc(14px + 0.5vw)'
-                  }
-                }}
-              />
-            </Box>
           </Box>
         </Box>
       ) : (
-        // Desktop view content
-        <Box sx={{ p: 3 }}>
-          {/* Header section with responsive layout */}
-          <Box sx={{ mb: 3 }}>
-            {/* Title */}
-            <Typography 
-              variant="h5" 
-              sx={{ 
-                mb: 2, 
-                textAlign: 'left',
-                fontWeight: 'bold'
-              }}
-            >
-              Daily Sales
-            </Typography>
-
-            {/* Action Buttons */}
-            <Grid container spacing={2} direction="row">
-              <Grid item xs={12} md={4}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  fullWidth
-                  startIcon={<AddIcon />}
-                  onClick={() => setOpenNewDialog(true)}
-                >
-                  Add New Sale
-                </Button>
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <Button
-                  variant="contained"
-                  color="secondary"
-                  fullWidth
-                  startIcon={<PersonAddIcon />}
-                  onClick={handleOpenCustomerDialog}
-                >
-                  Add New Customer
-                </Button>
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <Button
-                  variant="contained"
-                  color="info"
-                  fullWidth
-                  startIcon={<AddBusinessIcon />}
-                  onClick={handleOpenProductDialog}
-                >
-                  Add New Product
-                </Button>
-              </Grid>
+        // Desktop View
+        <Box>
+          <Grid container spacing={2} direction="row">
+            <Grid item xs={12} md={4}>
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                startIcon={<AddIcon />}
+                onClick={() => setOpenNewDialog(true)}
+              >
+                Add New Sale
+              </Button>
             </Grid>
-          </Box>
+            <Grid item xs={12} md={4}>
+              <Button
+                variant="contained"
+                color="secondary"
+                fullWidth
+                startIcon={<PersonAddIcon />}
+                onClick={handleOpenCustomerDialog}
+              >
+                Add New Customer
+              </Button>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Button
+                variant="contained"
+                color="info"
+                fullWidth
+                startIcon={<AddBusinessIcon />}
+                onClick={handleOpenProductDialog}
+              >
+                Add New Product
+              </Button>
+            </Grid>
+          </Grid>
 
           {/* Filter section */}
           <Paper sx={{ p: 2, mb: 3 }}>
@@ -1223,302 +1086,76 @@ function DailySales() {
             </Grid>
           </Paper>
 
-          {/* Desktop Table View */}
-          <TableContainer component={Paper} sx={{ mt: 2 }}>
-            <Table stickyHeader>
+          {/* Sales Table for Desktop */}
+          <TableContainer component={Paper} sx={{ mt: 3 }}>
+            <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Date
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Customer
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Product
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Quantity
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Unit Price
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Discount
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Delivery Info
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Status
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Total
-                  </TableCell>
-                  <TableCell sx={{ 
-                    fontWeight: 'bold',
-                    backgroundColor: 'background.paper',
-                  }}>
-                    Actions
-                  </TableCell>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Customer</TableCell>
+                  <TableCell>Product</TableCell>
+                  <TableCell align="right">Quantity</TableCell>
+                  <TableCell align="right">Unit Price</TableCell>
+                  <TableCell align="right">Total</TableCell>
+                  <TableCell>Actions</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={10} align="center">Loading...</TableCell>
-                  </TableRow>
-                ) : (
-                  filteredSales
-                    .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
-                    .map((sale) => {
-                      const subtotal = sale.quantity * sale.unit_price;
-                      const discountAmount = sale.discount_type === DISCOUNT_TYPES.PERCENTAGE
-                        ? (subtotal * sale.discount_value / 100)
-                        : (sale.discount_value || 0);
-                      const total = subtotal - discountAmount + (sale.is_promotional ? 0 : sale.delivery_charge);
-                      
-                      return (
-                        <TableRow 
-                          key={sale.id}
-                          onClick={() => handleRowClick(sale)}
-                          sx={{ 
-                            cursor: editingId === sale.id ? 'default' : 'pointer',
-                            '&:hover': {
-                              backgroundColor: editingId === sale.id ? 'inherit' : 'rgba(0, 0, 0, 0.04)'
-                            }
-                          }}
-                        >
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <LocalizationProvider dateAdapter={AdapterDayjs}>
-                                <DatePicker
-                                  value={editedSale.date}
-                                  onChange={(newValue) => handleFieldChange('date', newValue)}
-                                  renderInput={(params) => <TextField {...params} size="small" />}
-                                />
-                              </LocalizationProvider>
-                            ) : (
-                              dayjs(sale.date).format('YYYY-MM-DD')
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <FormControl fullWidth size="small">
-                                <Select
-                                  value={editedSale.customer_id}
-                                  onChange={(e) => handleFieldChange('customer_id', e.target.value)}
-                                >
-                                  {customers.map((customer) => (
-                                    <MenuItem key={customer.id} value={customer.id}>
-                                      {customer.name}
-                                    </MenuItem>
-                                  ))}
-                                </Select>
-                              </FormControl>
-                            ) : (
-                              sale.customer?.name
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <FormControl fullWidth size="small">
-                                <Select
-                                  value={editedSale.product_id}
-                                  onChange={(e) => handleFieldChange('product_id', e.target.value)}
-                                >
-                                  {products.map((product) => (
-                                    <MenuItem key={product.id} value={product.id}>
-                                      {product.name}
-                                    </MenuItem>
-                                  ))}
-                                </Select>
-                              </FormControl>
-                            ) : (
-                              sale.product?.name
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <TextField
-                                type="number"
-                                size="small"
-                                value={editedSale.quantity}
-                                onChange={(e) => handleFieldChange('quantity', e.target.value)}
-                              />
-                            ) : (
-                              sale.quantity
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <TextField
-                                type="number"
-                                size="small"
-                                value={editedSale.unit_price}
-                                onChange={(e) => handleFieldChange('unit_price', e.target.value)}
-                                InputProps={{
-                                  startAdornment: <InputAdornment position="start">$</InputAdornment>,
-                                }}
-                              />
-                            ) : (
-                              `$${sale.unit_price}`
-                            )}
-                          </TableCell>
-                          <TableCell align="right">
-                            {sale.discount_type ? (
-                              <Typography>
-                                {sale.discount_type === DISCOUNT_TYPES.PERCENTAGE
-                                  ? `${sale.discount_value}%`
-                                  : `$${sale.discount_value}`}
-                                <Typography variant="caption" color="error.main" display="block">
-                                  (-${discountAmount.toFixed(2)})
-                                </Typography>
-                              </Typography>
-                            ) : (
-                              'No Discount'
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {sale.has_delivery ? (
-                              <Box>
-                                <Typography>
-                                  {sale.is_promotional ? 'Free Delivery' : `$${sale.delivery_charge}`}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Cost: ${sale.delivery_cost}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Company: {sale.delivery_company}
-                                </Typography>
-                              </Box>
-                            ) : (
-                              'No Delivery'
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Chip 
-                              label={sale.delivery_status} 
-                              size="small"
-                              color={getDeliveryStatusColor(sale.delivery_status)}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openStatusUpdateDialog(sale);
-                              }}
-                            />
-                          </TableCell>
-                          <TableCell align="right">${(total || 0).toFixed(2)}</TableCell>
-                          <TableCell>
-                            {editingId === sale.id ? (
-                              <>
-                                <IconButton onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleSave(sale.id);
-                                }} size="small">
-                                  <SaveIcon />
-                                </IconButton>
-                                <IconButton onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleCancel();
-                                }} size="small">
-                                  <CancelIcon />
-                                </IconButton>
-                              </>
-                            ) : (
-                              <>
-                                <IconButton onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleEdit(sale);
-                                }} size="small">
-                                  <EditIcon />
-                                </IconButton>
-                                <IconButton onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDelete(sale.id);
-                                }} size="small">
-                                  <DeleteIcon />
-                                </IconButton>
-                                {sale.has_delivery && (
-                                  <IconButton
-                                    size="small"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      openStatusUpdateDialog(sale);
-                                    }}
-                                  >
-                                    <LocalShippingIcon />
-                                  </IconButton>
-                                )}
-                              </>
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                )}
+                {filteredSales
+                  .slice(page * rowsPerPage, (page + 1) * rowsPerPage)
+                  .map((sale) => (
+                    <TableRow key={sale.id}>
+                      <TableCell>{dayjs(sale.date).format('YYYY-MM-DD')}</TableCell>
+                      <TableCell>{sale.customer?.name}</TableCell>
+                      <TableCell>{sale.product?.name}</TableCell>
+                      <TableCell align="right">{sale.quantity}</TableCell>
+                      <TableCell align="right">${sale.unit_price}</TableCell>
+                      <TableCell align="right">${(sale.quantity * sale.unit_price).toFixed(2)}</TableCell>
+                      <TableCell>
+                        <IconButton onClick={(e) => {
+                          e.stopPropagation();
+                          handleEdit(sale);
+                        }} size="small">
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(sale.id);
+                        }} size="small">
+                          <DeleteIcon />
+                        </IconButton>
+                      </TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </Table>
+            <TablePagination
+              component="div"
+              count={filteredSales.length}
+              page={page}
+              onPageChange={(e, newPage) => setPage(newPage)}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={(e) => {
+                setRowsPerPage(parseInt(e.target.value, 10));
+                setPage(0);
+              }}
+              rowsPerPageOptions={[5, 10, 25]}
+            />
           </TableContainer>
-
-          <TablePagination
-            component="div"
-            count={filteredSales.length}
-            page={page}
-            onPageChange={(e, newPage) => setPage(newPage)}
-            rowsPerPage={rowsPerPage}
-            onRowsPerPageChange={(e) => {
-              setRowsPerPage(parseInt(e.target.value, 10));
-              setPage(0);
-            }}
-            sx={{
-              '.MuiTablePagination-selectLabel, .MuiTablePagination-displayedRows': {
-                [theme.breakpoints.down('sm')]: {
-                  display: 'none',
-                },
-              },
-            }}
-          />
         </Box>
       )}
 
       {/* Dialogs */}
       <Dialog 
         open={openNewDialog} 
-        onClose={() => setOpenNewDialog(false)}
-        fullWidth
+        onClose={handleCancel}
         maxWidth="md"
-        keepMounted={false}
-        disablePortal
+        fullWidth
       >
         <form onSubmit={handleSubmit} noValidate>
-          <DialogTitle>Add New Sale</DialogTitle>
+          <DialogTitle>
+            {editingId ? 'Edit Sale' : 'New Sale'}
+          </DialogTitle>
           <DialogContent>
             <Box sx={{ mt: 2 }}>
               <Grid container spacing={2}>
@@ -1526,8 +1163,8 @@ function DailySales() {
                   <LocalizationProvider dateAdapter={AdapterDayjs}>
                     <DatePicker
                       label="Date"
-                      value={saleData.date}
-                      onChange={(newValue) => setSaleData({ ...saleData, date: newValue })}
+                      value={editingId ? editedSale.date : saleData.date}
+                      onChange={(newValue) => editingId ? setEditedSale({ ...editedSale, date: newValue }) : setSaleData({ ...saleData, date: newValue })}
                       renderInput={(params) => <TextField {...params} fullWidth />}
                     />
                   </LocalizationProvider>
@@ -1537,8 +1174,8 @@ function DailySales() {
                     <FormControl fullWidth>
                       <InputLabel>Customer</InputLabel>
                       <Select
-                        value={saleData.customer_id}
-                        onChange={(e) => setSaleData({ ...saleData, customer_id: e.target.value })}
+                        value={editingId ? editedSale.customer_id : saleData.customer_id}
+                        onChange={(e) => editingId ? setEditedSale({ ...editedSale, customer_id: e.target.value }) : setSaleData({ ...saleData, customer_id: e.target.value })}
                         label="Customer"
                       >
                         {customers.map((customer) => (
@@ -1562,8 +1199,8 @@ function DailySales() {
                     <FormControl fullWidth>
                       <InputLabel>Product</InputLabel>
                       <Select
-                        value={saleData.product_id}
-                        onChange={(e) => handleProductChange(e.target.value)}
+                        value={editingId ? editedSale.product_id : saleData.product_id}
+                        onChange={(e) => editingId ? setEditedSale({ ...editedSale, product_id: e.target.value }) : handleProductChange(e.target.value)}
                         label="Product"
                       >
                         {products.map((product) => (
@@ -1587,8 +1224,8 @@ function DailySales() {
                     fullWidth
                     label="Quantity"
                     type="number"
-                    value={saleData.quantity}
-                    onChange={(e) => setSaleData({ ...saleData, quantity: e.target.value })}
+                    value={editingId ? editedSale.quantity : saleData.quantity}
+                    onChange={(e) => editingId ? setEditedSale({ ...editedSale, quantity: e.target.value }) : setSaleData({ ...saleData, quantity: e.target.value })}
                     inputProps={{ min: "1" }}
                   />
                 </Grid>
@@ -1597,8 +1234,8 @@ function DailySales() {
                     fullWidth
                     label="Unit Price"
                     type="number"
-                    value={saleData.unit_price}
-                    onChange={(e) => setSaleData({ ...saleData, unit_price: e.target.value })}
+                    value={editingId ? editedSale.unit_price : saleData.unit_price}
+                    onChange={(e) => editingId ? setEditedSale({ ...editedSale, unit_price: e.target.value }) : setSaleData({ ...saleData, unit_price: e.target.value })}
                     inputProps={{ step: "0.01", min: "0" }}
                   />
                 </Grid>
@@ -1610,8 +1247,15 @@ function DailySales() {
                   <FormControl fullWidth>
                     <InputLabel>Delivery Required</InputLabel>
                     <Select
-                      value={saleData.has_delivery}
-                      onChange={(e) => setSaleData(prev => ({ 
+                      value={editingId ? editedSale.has_delivery : saleData.has_delivery}
+                      onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                        ...prev, 
+                        has_delivery: e.target.value,
+                        delivery_charge: e.target.value ? prev.delivery_charge : 0,
+                        delivery_cost: e.target.value ? prev.delivery_cost : 0,
+                        is_promotional: e.target.value ? prev.is_promotional : false,
+                        delivery_status: e.target.value ? DELIVERY_STATUSES.PENDING : null
+                      })) : setSaleData(prev => ({ 
                         ...prev, 
                         has_delivery: e.target.value,
                         delivery_charge: e.target.value ? prev.delivery_charge : 0,
@@ -1627,14 +1271,17 @@ function DailySales() {
                   </FormControl>
                 </Grid>
 
-                {saleData.has_delivery && (
+                {(editingId ? editedSale.has_delivery : saleData.has_delivery) && (
                   <>
                     <Grid item xs={12} sm={4}>
                       <FormControl fullWidth>
                         <InputLabel>Delivery Company</InputLabel>
                         <Select
-                          value={saleData.delivery_company || ''}
-                          onChange={(e) => setSaleData(prev => ({ 
+                          value={editingId ? editedSale.delivery_company : saleData.delivery_company}
+                          onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                            ...prev, 
+                            delivery_company: e.target.value
+                          })) : setSaleData(prev => ({ 
                             ...prev, 
                             delivery_company: e.target.value
                           }))}
@@ -1654,8 +1301,12 @@ function DailySales() {
                       <FormControl fullWidth>
                         <InputLabel>Delivery Type</InputLabel>
                         <Select
-                          value={saleData.is_promotional}
-                          onChange={(e) => setSaleData(prev => ({ 
+                          value={editingId ? editedSale.is_promotional : saleData.is_promotional}
+                          onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                            ...prev, 
+                            is_promotional: e.target.value,
+                            delivery_charge: e.target.value ? 0 : prev.delivery_cost
+                          })) : setSaleData(prev => ({ 
                             ...prev, 
                             is_promotional: e.target.value,
                             delivery_charge: e.target.value ? 0 : prev.delivery_cost
@@ -1673,8 +1324,12 @@ function DailySales() {
                         fullWidth
                         label="Delivery Cost (Business)"
                         type="number"
-                        value={saleData.delivery_cost}
-                        onChange={(e) => setSaleData(prev => ({ 
+                        value={editingId ? editedSale.delivery_cost : saleData.delivery_cost}
+                        onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                          ...prev, 
+                          delivery_cost: e.target.value,
+                          delivery_charge: prev.is_promotional ? 0 : e.target.value
+                        })) : setSaleData(prev => ({ 
                           ...prev, 
                           delivery_cost: e.target.value,
                           delivery_charge: prev.is_promotional ? 0 : e.target.value
@@ -1685,14 +1340,17 @@ function DailySales() {
                       />
                     </Grid>
 
-                    {!saleData.is_promotional && (
+                    {!editingId && !saleData.is_promotional && (
                       <Grid item xs={12} sm={4}>
                         <TextField
                           fullWidth
                           label="Delivery Charge (Customer)"
                           type="number"
-                          value={saleData.delivery_charge}
-                          onChange={(e) => setSaleData(prev => ({ 
+                          value={editingId ? editedSale.delivery_charge : saleData.delivery_charge}
+                          onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                            ...prev, 
+                            delivery_charge: e.target.value 
+                          })) : setSaleData(prev => ({ 
                             ...prev, 
                             delivery_charge: e.target.value 
                           }))}
@@ -1712,8 +1370,12 @@ function DailySales() {
                   <FormControl fullWidth>
                     <InputLabel>Discount Type</InputLabel>
                     <Select
-                      value={saleData.discount_type || ''}
-                      onChange={(e) => setSaleData(prev => ({ 
+                      value={editingId ? editedSale.discount_type : saleData.discount_type}
+                      onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                        ...prev, 
+                        discount_type: e.target.value,
+                        discount_value: e.target.value ? prev.discount_value : 0
+                      })) : setSaleData(prev => ({ 
                         ...prev, 
                         discount_type: e.target.value,
                         discount_value: e.target.value ? prev.discount_value : 0
@@ -1727,26 +1389,29 @@ function DailySales() {
                   </FormControl>
                 </Grid>
 
-                {saleData.discount_type && (
+                {(editingId ? editedSale.discount_type : saleData.discount_type) && (
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
-                      label={saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE ? 'Discount Percentage' : 'Discount Amount'}
+                      label={(editingId ? editedSale.discount_type : saleData.discount_type) === DISCOUNT_TYPES.PERCENTAGE ? 'Discount Percentage' : 'Discount Amount'}
                       type="number"
-                      value={saleData.discount_value}
-                      onChange={(e) => setSaleData(prev => ({ 
+                      value={editingId ? editedSale.discount_value : saleData.discount_value}
+                      onChange={(e) => editingId ? setEditedSale(prev => ({ 
+                        ...prev, 
+                        discount_value: e.target.value 
+                      })) : setSaleData(prev => ({ 
                         ...prev, 
                         discount_value: e.target.value 
                       }))}
                       InputProps={{
                         inputProps: { 
                           min: 0,
-                          max: saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE ? 100 : undefined,
+                          max: (editingId ? editedSale.discount_type : saleData.discount_type) === DISCOUNT_TYPES.PERCENTAGE ? 100 : undefined,
                           step: "0.01"
                         },
                         endAdornment: (
                           <InputAdornment position="end">
-                            {saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE ? '%' : '$'}
+                            {(editingId ? editedSale.discount_type : saleData.discount_type) === DISCOUNT_TYPES.PERCENTAGE ? '%' : '$'}
                           </InputAdornment>
                         )
                       }}
@@ -1754,7 +1419,7 @@ function DailySales() {
                   </Grid>
                 )}
                 {/* Add price summary section */}
-                {(saleData.quantity && saleData.unit_price) && (
+                {(editingId ? editedSale.quantity : saleData.quantity) && (editingId ? editedSale.unit_price : saleData.unit_price) && (
                   <Box sx={{ mt: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
                     <Typography variant="h6" gutterBottom>Price Summary</Typography>
                     <Grid container spacing={1}>
@@ -1763,39 +1428,53 @@ function DailySales() {
                       </Grid>
                       <Grid item xs={6}>
                         <Typography align="right">
-                          ${((Number(saleData.quantity) * Number(saleData.unit_price)) || 0).toFixed(2)}
+                          ${((Number(editingId ? editedSale.quantity : saleData.quantity) * Number(editingId ? editedSale.unit_price : saleData.unit_price)) || 0).toFixed(2)}
                         </Typography>
                       </Grid>
 
-                      {saleData.discount_type && (
+                      {(editingId ? editedSale.discount_type : saleData.discount_type) && (
                         <>
                           <Grid item xs={6}>
                             <Typography color="error">
-                              Discount ({saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE 
-                                ? `${saleData.discount_value}%`
-                                : `$${saleData.discount_value}`}):
+                              Discount ({(editingId ? editedSale.discount_type : saleData.discount_type) === DISCOUNT_TYPES.PERCENTAGE 
+                                ? `${editingId ? editedSale.discount_value : saleData.discount_value}%`
+                                : `$${editingId ? editedSale.discount_value : saleData.discount_value}`}):
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
                             <Typography align="right" color="error">
-                              -${((saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE
-                                ? (Number(saleData.quantity) * Number(saleData.unit_price) * Number(saleData.discount_value) / 100)
-                                : Number(saleData.discount_value)) || 0).toFixed(2)}
+                              -${(() => {
+                                const quantity = Number(editingId ? editedSale.quantity : saleData.quantity);
+                                const unitPrice = Number(editingId ? editedSale.unit_price : saleData.unit_price);
+                                const discountType = editingId ? editedSale.discount_type : saleData.discount_type;
+                                const discountValue = Number(editingId ? editedSale.discount_value : saleData.discount_value) || 0;
+                                
+                                if (discountType === DISCOUNT_TYPES.PERCENTAGE) {
+                                  return ((quantity * unitPrice * discountValue) / 100).toFixed(2);
+                                }
+                                return discountValue.toFixed(2);
+                              })()}
                             </Typography>
                           </Grid>
                         </>
                       )}
 
-                      {saleData.has_delivery && (
+                      {(editingId ? editedSale.has_delivery : saleData.has_delivery) && (
                         <>
                           <Grid item xs={6}>
                             <Typography>
-                              Delivery {saleData.is_promotional && '(Free)'}:
+                              Delivery {(editingId ? editedSale.is_promotional : saleData.is_promotional) && '(Free)'}:
                             </Typography>
                           </Grid>
                           <Grid item xs={6}>
                             <Typography align="right">
-                              ${((saleData.is_promotional ? 0 : Number(saleData.delivery_charge)) || 0).toFixed(2)}
+                              ${(() => {
+                                const isPromotional = editingId ? editedSale.is_promotional : saleData.is_promotional;
+                                if (isPromotional) return '0.00';
+                                
+                                const deliveryCharge = Number(editingId ? editedSale.delivery_charge : saleData.delivery_charge) || 0;
+                                return deliveryCharge.toFixed(2);
+                              })()}
                             </Typography>
                           </Grid>
                         </>
@@ -1810,11 +1489,28 @@ function DailySales() {
                       </Grid>
                       <Grid item xs={6}>
                         <Typography variant="h6" align="right">
-                          ${(((Number(saleData.quantity) * Number(saleData.unit_price)) -
-                            (saleData.discount_type === DISCOUNT_TYPES.PERCENTAGE
-                              ? (Number(saleData.quantity) * Number(saleData.unit_price) * Number(saleData.discount_value) / 100)
-                              : Number(saleData.discount_value)) +
-                            (saleData.has_delivery && !saleData.is_promotional ? Number(saleData.delivery_charge) : 0)) || 0).toFixed(2)}
+                          ${(() => {
+                            const quantity = Number(editingId ? editedSale.quantity : saleData.quantity);
+                            const unitPrice = Number(editingId ? editedSale.unit_price : saleData.unit_price);
+                            const subtotal = quantity * unitPrice;
+                            
+                            // Calculate discount
+                            const discountType = editingId ? editedSale.discount_type : saleData.discount_type;
+                            const discountValue = Number(editingId ? editedSale.discount_value : saleData.discount_value) || 0;
+                            const discount = discountType === DISCOUNT_TYPES.PERCENTAGE 
+                              ? (subtotal * discountValue) / 100 
+                              : discountValue;
+                            
+                            // Calculate delivery charge
+                            const hasDelivery = editingId ? editedSale.has_delivery : saleData.has_delivery;
+                            const isPromotional = editingId ? editedSale.is_promotional : saleData.is_promotional;
+                            const deliveryCharge = hasDelivery && !isPromotional 
+                              ? Number(editingId ? editedSale.delivery_charge : saleData.delivery_charge) 
+                              : 0;
+                            
+                            // Calculate total
+                            return (subtotal - discount + deliveryCharge).toFixed(2);
+                          })()}
                         </Typography>
                       </Grid>
                     </Grid>
@@ -1824,7 +1520,7 @@ function DailySales() {
             </Box>
           </DialogContent>
           <DialogActions>
-            <Button type="button" onClick={() => setOpenNewDialog(false)}>Cancel</Button>
+            <Button type="button" onClick={handleCancel}>Cancel</Button>
             <Button type="submit" variant="contained" color="primary">
               Save
             </Button>
