@@ -18,7 +18,18 @@ import { DELIVERY_STATUSES } from './DailySales';
 const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
-  const total = (sale.quantity * sale.unit_price) - (sale.discount_value || 0);
+  
+  // Calculate total with delivery charge and discount
+  const total = (() => {
+    const subtotal = sale.quantity * sale.unit_price;
+    const discount = sale.discount_type === 'PERCENTAGE'
+      ? (subtotal * sale.discount_value) / 100
+      : (sale.discount_value || 0);
+    const deliveryCharge = sale.has_delivery && !sale.is_promotional
+      ? (sale.delivery_charge || 0)
+      : 0;
+    return (subtotal - discount + deliveryCharge).toFixed(2);
+  })();
 
   return (
     <Box sx={{ 
@@ -128,7 +139,7 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     variant="body1"
                     sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                   >
-                    {sale.customer?.name}
+                    {sale.customers?.name || 'N/A'}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -143,7 +154,7 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     variant="body1"
                     sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                   >
-                    {sale.customer?.phone || 'N/A'}
+                    {sale.customers?.phone || 'N/A'}
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -158,7 +169,7 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     variant="body1"
                     sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                   >
-                    {sale.customer?.location || 'N/A'}
+                    {sale.customers?.location || 'N/A'}
                   </Typography>
                 </Grid>
               </Grid>
@@ -191,7 +202,7 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     variant="body1"
                     sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                   >
-                    {sale.product?.name}
+                    {sale.products?.name || 'N/A'}
                   </Typography>
                 </Grid>
                 <Grid item xs={12} sm={6}>
@@ -237,6 +248,7 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                   >
                     ${sale.discount_value || '0'}
+                    {sale.discount_type === 'PERCENTAGE' ? '%' : ''}
                   </Typography>
                 </Grid>
                 <Grid item xs={12}>
@@ -249,14 +261,14 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                       fontWeight: 'bold'
                     }}
                   >
-                    Total: ${total.toFixed(2)}
+                    Total: ${total}
                   </Typography>
                 </Grid>
               </Grid>
             </Paper>
           </Grid>
 
-          {/* Delivery Section */}
+          {/* Delivery Information Section */}
           {sale.has_delivery && (
             <Grid item xs={12}>
               <Paper sx={{ p: '4vw' }}>
@@ -279,13 +291,16 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                     >
                       Status
                     </Typography>
-                    <Box sx={{ mt: 1 }}>
-                      <Chip
-                        label={sale.delivery_status}
-                        color={getDeliveryStatusColor(sale.delivery_status)}
-                        sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                      />
-                    </Box>
+                    <Chip
+                      label={sale.delivery_status || 'Pending'}
+                      sx={{
+                        backgroundColor: getDeliveryStatusColor(sale.delivery_status),
+                        color: 'white',
+                        fontSize: 'calc(12px + 0.5vw)',
+                        height: 'auto',
+                        py: 0.5
+                      }}
+                    />
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <Typography 
@@ -299,10 +314,10 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                       variant="body1"
                       sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                     >
-                      {sale.delivery_company || 'N/A'}
+                      {sale.delivery_companies?.name || sale.delivery_company || 'N/A'}
                     </Typography>
                   </Grid>
-                  <Grid item xs={12} sm={6}>
+                  <Grid item xs={12}>
                     <Typography 
                       variant="subtitle2" 
                       color="text.secondary"
@@ -314,26 +329,9 @@ const SaleDetailView = ({ sale, onBack, onEdit, getDeliveryStatusColor }) => {
                       variant="body1"
                       sx={{ fontSize: 'calc(14px + 0.5vw)' }}
                     >
-                      ${sale.delivery_charge || '0'}
+                      ${sale.delivery_charge?.toFixed(2) || '0.00'}
                     </Typography>
                   </Grid>
-                  {sale.delivery_notes && (
-                    <Grid item xs={12}>
-                      <Typography 
-                        variant="subtitle2" 
-                        color="text.secondary"
-                        sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                      >
-                        Notes
-                      </Typography>
-                      <Typography 
-                        variant="body1"
-                        sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-                      >
-                        {sale.delivery_notes}
-                      </Typography>
-                    </Grid>
-                  )}
                 </Grid>
               </Paper>
             </Grid>

@@ -145,8 +145,8 @@ function DailySales() {
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   
+  const isMobile = useMediaQuery('(max-width:600px)');
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   // Memoize fetchSales to prevent unnecessary re-renders
   const memoizedFetchSales = useCallback(async () => {
@@ -158,12 +158,17 @@ function DailySales() {
           customers!inner (
             id,
             name,
-            location
+            location,
+            phone
           ),
           products!inner (
             id,
             name,
             unit_price
+          ),
+          delivery_companies (
+            id,
+            name
           )
         `)
         .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
@@ -656,63 +661,71 @@ function DailySales() {
   };
 
   // Mobile list item component
-  const MobileListItem = ({ sale }) => {
-    const total = (sale.quantity * sale.unit_price) - (sale.discount_value || 0);
-    
+  const renderMobileSaleCard = (sale, theme) => {
+    const isDarkMode = theme.palette.mode === 'dark';
+
     return (
-      <Grid container spacing={2}>
+      <Grid container spacing={2} sx={{ 
+        p: '3vw', 
+        backgroundColor: isDarkMode ? '#1a1f2e' : 'background.paper',
+        borderRadius: '2vw',
+        boxShadow: theme.shadows[1]
+      }}>
+        {/* Date */}
         <Grid item xs={12}>
           <Typography 
             variant="subtitle2" 
             color="text.secondary"
-            sx={{ fontSize: 'calc(12px + 0.5vw)' }}
+            sx={{ fontSize: 'calc(12px + 0.3vw)' }}
           >
-            Date: {dayjs(sale.date).format('YYYY-MM-DD')}
+            {dayjs(sale.date).format('YYYY-MM-DD')}
           </Typography>
         </Grid>
-        <Grid item container xs={12} alignItems="center">
-          <Grid item xs={6}>
-            <Typography 
-              variant="subtitle1" 
-              fontWeight="bold"
-              sx={{ fontSize: 'calc(16px + 0.5vw)' }}
-            >
-              {sale.customer?.name}
-            </Typography>
-          </Grid>
-          <Grid item xs={6}>
-            <Typography 
-              variant="subtitle1"
-              sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-            >
-              {sale.product?.name}
-            </Typography>
-          </Grid>
+
+        {/* Customer and Product Names */}
+        <Grid item xs={12}>
+          <Typography 
+            variant="subtitle1" 
+            sx={{ 
+              fontSize: 'calc(14px + 0.5vw)',
+              fontWeight: 'bold',
+              color: 'text.primary',
+              mb: '0.5vw'
+            }}
+          >
+            {sale.customers?.name || 'N/A'}
+          </Typography>
+          <Typography 
+            variant="body1"
+            sx={{ 
+              fontSize: 'calc(12px + 0.4vw)',
+              color: 'text.secondary'
+            }}
+          >
+            {sale.products?.name || 'N/A'}
+          </Typography>
         </Grid>
-        <Grid item container xs={12} alignItems="center">
-          <Grid item xs={6}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography 
-                variant="body2" 
-                color="text.secondary"
-                sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-              >
-                Qty:
-              </Typography>
-              <Typography 
-                variant="body1"
-                sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-              >
-                {sale.quantity}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={6}>
+
+        {/* Quantity and Total */}
+        <Grid item container xs={12} alignItems="center" spacing={1}>
+          <Grid item>
             <Typography 
-              variant="body1" 
-              fontWeight="bold" 
+              variant="body2" 
+              color="text.secondary"
+              sx={{ fontSize: 'calc(12px + 0.3vw)' }}
+            >
+              Qty: {sale.quantity}
+            </Typography>
+          </Grid>
+          <Grid item xs>
+            <Typography 
+              variant="h6" 
               color="primary"
-              sx={{ fontSize: 'calc(14px + 0.5vw)' }}
+              align="right"
+              sx={{ 
+                fontSize: 'calc(16px + 0.5vw)',
+                fontWeight: 'bold'
+              }}
             >
               ${(() => {
                 const subtotal = sale.quantity * sale.unit_price;
@@ -727,42 +740,48 @@ function DailySales() {
             </Typography>
           </Grid>
         </Grid>
-        <Grid item xs={12}>
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center',
-                gap: 1,
-                color: 'text.secondary',
-              }}>
-                <PhoneIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
-                <Typography 
-                  variant="body2" 
-                  noWrap
-                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                >
-                  {sale.customer?.phone || 'N/A'}
-                </Typography>
-              </Box>
-            </Grid>
-            <Grid item xs={6}>
-              <Box sx={{ 
-                display: 'flex', 
-                alignItems: 'center',
-                gap: 1,
-                color: 'text.secondary',
-              }}>
-                <LocationOnIcon sx={{ fontSize: 'calc(16px + 0.5vw)' }} />
-                <Typography 
-                  variant="body2" 
-                  noWrap
-                  sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                >
-                  {sale.customer?.location || 'N/A'}
-                </Typography>
-              </Box>
-            </Grid>
+
+        {/* Contact Info */}
+        <Grid item container xs={12} spacing={2}>
+          <Grid item xs={6}>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              gap: '1vw'
+            }}>
+              <PhoneIcon sx={{ 
+                fontSize: 'calc(14px + 0.4vw)',
+                color: 'text.secondary'
+              }} />
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                noWrap
+                sx={{ fontSize: 'calc(12px + 0.3vw)' }}
+              >
+                {sale.customers?.phone || 'N/A'}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={6}>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center',
+              gap: '1vw'
+            }}>
+              <LocationOnIcon sx={{ 
+                fontSize: 'calc(14px + 0.4vw)',
+                color: 'text.secondary'
+              }} />
+              <Typography 
+                variant="body2" 
+                color="text.secondary"
+                noWrap
+                sx={{ fontSize: 'calc(12px + 0.3vw)' }}
+              >
+                {sale.customers?.location || 'N/A'}
+              </Typography>
+            </Box>
           </Grid>
         </Grid>
       </Grid>
@@ -770,7 +789,7 @@ function DailySales() {
   };
 
   const filteredSales = sales.filter(sale => {
-    if (selectedLocation && sale.customer?.location !== selectedLocation) {
+    if (selectedLocation && sale.customers?.location !== selectedLocation) {
       return false;
     }
     return true;
@@ -794,186 +813,182 @@ function DailySales() {
         <Box sx={{ 
           width: '100vw',
           height: '100vh',
+          overflow: 'auto',
+          p: 0,
           position: 'fixed',
           top: 0,
           left: 0,
           backgroundColor: 'background.default',
-          pt: '64px', // Height of the app bar
-          overflowY: 'auto' // Make the entire container scrollable
+          pt: '64px' // Height of the app bar
         }}>
-          <Box sx={{
-            width: '90vw',
-            maxWidth: '600px',
-            margin: '0 auto',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            pb: 4
+          {/* Title */}
+          <Typography 
+            variant="h4" 
+            sx={{ 
+              mt: '16px',
+              mb: '3vw', 
+              textAlign: 'center',
+              fontSize: 'calc(20px + 1vw)',
+              fontWeight: 'bold'
+            }}
+          >
+            Daily Sales
+          </Typography>
+
+          {/* Action Buttons Container */}
+          <Box sx={{ 
+            display: 'flex', 
+            gap: '2vw', 
+            justifyContent: 'center',
+            width: '100%',
+            mb: '3vw'
           }}>
-            {/* Title */}
-            <Typography 
-              variant="h4" 
-              sx={{ 
-                my: 2, 
-                textAlign: 'center',
-                fontSize: 'calc(28px + 1vw)',
-                fontWeight: 'bold'
+            <IconButton
+              sx={{
+                width: '11vw',
+                height: '11vw',
+                maxWidth: '50px',
+                maxHeight: '50px',
+                minWidth: '40px',
+                minHeight: '40px',
+                borderRadius: '2vw',
+                backgroundColor: 'primary.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'primary.dark',
+                },
+              }}
+              onClick={() => setOpenNewDialog(true)}
+            >
+              <AddIcon sx={{ fontSize: 'calc(18px + 0.5vw)' }} />
+            </IconButton>
+            <IconButton
+              sx={{
+                width: '11vw',
+                height: '11vw',
+                maxWidth: '50px',
+                maxHeight: '50px',
+                minWidth: '40px',
+                minHeight: '40px',
+                borderRadius: '2vw',
+                backgroundColor: 'secondary.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'secondary.dark',
+                },
+              }}
+              onClick={handleOpenCustomerDialog}
+            >
+              <PersonAddIcon sx={{ fontSize: 'calc(18px + 0.5vw)' }} />
+            </IconButton>
+            <IconButton
+              sx={{
+                width: '11vw',
+                height: '11vw',
+                maxWidth: '50px',
+                maxHeight: '50px',
+                minWidth: '40px',
+                minHeight: '40px',
+                borderRadius: '2vw',
+                backgroundColor: 'info.main',
+                color: 'white',
+                '&:hover': {
+                  backgroundColor: 'info.dark',
+                },
+              }}
+              onClick={handleOpenProductDialog}
+            >
+              <AddBusinessIcon sx={{ fontSize: 'calc(18px + 0.5vw)' }} />
+            </IconButton>
+          </Box>
+
+          {/* Filters Container */}
+          <Box sx={{ 
+            px: '20px',
+            width: '100%',
+            boxSizing: 'border-box'
+          }}>
+            <FormControl
+              fullWidth
+              sx={{
+                mb: 2
               }}
             >
-              Daily Sales
-            </Typography>
-
-            {/* Action Buttons Container */}
-            <Box sx={{ 
-              display: 'flex', 
-              gap: 2, 
-              justifyContent: 'center',
-              width: '100%',
-              mb: 3
-            }}>
-              <IconButton
-                sx={{
-                  width: '50px',
-                  height: '50px',
-                  borderRadius: '12px',
-                  backgroundColor: 'primary.main',
-                  color: 'white',
-                  '&:hover': {
-                    backgroundColor: 'primary.dark',
-                  },
-                }}
-                onClick={() => setOpenNewDialog(true)}
+              <InputLabel>Location</InputLabel>
+              <Select
+                value={selectedLocation}
+                onChange={(e) => setSelectedLocation(e.target.value)}
+                label="Location"
               >
-                <AddIcon sx={{ fontSize: '24px' }} />
-              </IconButton>
-              <IconButton
-                sx={{
-                  width: '50px',
-                  height: '50px',
-                  borderRadius: '12px',
-                  backgroundColor: 'secondary.main',
-                  color: 'white',
-                  '&:hover': {
-                    backgroundColor: 'secondary.dark',
-                  },
-                }}
-                onClick={handleOpenCustomerDialog}
-              >
-                <PersonAddIcon sx={{ fontSize: '24px' }} />
-              </IconButton>
-              <IconButton
-                sx={{
-                  width: '50px',
-                  height: '50px',
-                  borderRadius: '12px',
-                  backgroundColor: 'info.main',
-                  color: 'white',
-                  '&:hover': {
-                    backgroundColor: 'info.dark',
-                  },
-                }}
-                onClick={handleOpenProductDialog}
-              >
-                <AddBusinessIcon sx={{ fontSize: '24px' }} />
-              </IconButton>
-            </Box>
+                <MenuItem value="">All Locations</MenuItem>
+                {locations.map((location) => (
+                  <MenuItem key={location} value={location}>
+                    {location}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-            {/* Filters Container */}
-            <Box sx={{ 
-              width: '100%',
-              mb: 3
-            }}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel sx={{ fontSize: 'calc(14px + 0.5vw)' }}>Location</InputLabel>
-                <Select
-                  value={selectedLocation}
-                  onChange={(e) => setSelectedLocation(e.target.value)}
-                  label="Location"
-                  sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-                >
-                  <MenuItem value="">All Locations</MenuItem>
-                  {locations.map((location) => (
-                    <MenuItem key={location} value={location}>
-                      {location}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+            <FormControl
+              fullWidth
+              sx={{
+                mb: 2
+              }}
+            >
+              <InputLabel>Quick Filter</InputLabel>
+              <Select
+                value={quickDateFilter}
+                onChange={(e) => handleQuickDateFilter(e.target.value)}
+                label="Quick Filter"
+              >
+                <MenuItem value="today">Today</MenuItem>
+                <MenuItem value="yesterday">Yesterday</MenuItem>
+                <MenuItem value="thisWeek">This Week</MenuItem>
+                <MenuItem value="thisMonth">This Month</MenuItem>
+                <MenuItem value="lastMonth">Last Month</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
 
-              <FormControl fullWidth>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                  <Typography 
-                    variant="caption" 
-                    color="primary"
-                    sx={{ fontSize: 'calc(12px + 0.5vw)' }}
-                  >
-                    Quick Filter
-                  </Typography>
-                </Box>
-                <Select
-                  value={quickDateFilter}
-                  onChange={(e) => handleQuickDateFilter(e.target.value)}
+          {/* Sales List */}
+          <Box sx={{ 
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2vw'
+          }}>
+            {loading ? (
+              <Typography sx={{ fontSize: 'calc(14px + 0.4vw)' }}>Loading...</Typography>
+            ) : filteredSales.length > 0 ? (
+              filteredSales.map((sale) => (
+                <Box 
+                  key={sale.id} 
                   sx={{ 
-                    width: '100%',
-                    fontSize: 'calc(14px + 0.5vw)'
+                    cursor: 'pointer',
+                    mt: '20px',
+                    mx: '20px',
+                    marginLeft: '30px',
+                    '&:hover': {
+                      opacity: 0.8
+                    },
+                    '&:last-child': {
+                      mb: '10px'
+                    }
                   }}
+                  onClick={() => handleRowClick(sale)}
                 >
-                  <MenuItem value="today">Today</MenuItem>
-                  <MenuItem value="yesterday">Yesterday</MenuItem>
-                  <MenuItem value="thisWeek">This Week</MenuItem>
-                  <MenuItem value="thisMonth">This Month</MenuItem>
-                  <MenuItem value="lastMonth">Last Month</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-
-            {/* Sales List Container */}
-            <Box sx={{ 
-              width: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2
-            }}>
-              {filteredSales.length > 0 ? (
-                filteredSales.map((sale) => (
-                  <Paper
-                    key={sale.id}
-                    elevation={1}
-                    sx={{
-                      p: '4vw',
-                      width: '100%',
-                      backgroundColor: 'background.paper',
-                      cursor: 'pointer',
-                      borderRadius: 2,
-                      '&:hover': {
-                        backgroundColor: 'action.hover',
-                      },
-                    }}
-                    onClick={() => handleRowClick(sale)}
-                  >
-                    <MobileListItem sale={sale} />
-                  </Paper>
-                ))
-              ) : (
-                <Paper
-                  elevation={1}
-                  sx={{
-                    p: '4vw',
-                    width: '100%',
-                    backgroundColor: 'background.paper',
-                    textAlign: 'center',
-                    borderRadius: 2
-                  }}
-                >
-                  <Typography 
-                    color="text.secondary"
-                    sx={{ fontSize: 'calc(14px + 0.5vw)' }}
-                  >
-                    No sales found
-                  </Typography>
-                </Paper>
-              )}
-            </Box>
+                  {renderMobileSaleCard(sale, theme)}
+                </Box>
+              ))
+            ) : (
+              <Typography sx={{ 
+                fontSize: 'calc(14px + 0.4vw)',
+                textAlign: 'center',
+                color: 'text.secondary'
+              }}>
+                No sales found
+              </Typography>
+            )}
           </Box>
         </Box>
       ) : (
@@ -1106,8 +1121,8 @@ function DailySales() {
                   .map((sale) => (
                     <TableRow key={sale.id}>
                       <TableCell>{dayjs(sale.date).format('YYYY-MM-DD')}</TableCell>
-                      <TableCell>{sale.customer?.name}</TableCell>
-                      <TableCell>{sale.product?.name}</TableCell>
+                      <TableCell>{sale.customers?.name}</TableCell>
+                      <TableCell>{sale.products?.name}</TableCell>
                       <TableCell align="right">{sale.quantity}</TableCell>
                       <TableCell align="right">${sale.unit_price}</TableCell>
                       <TableCell align="right">${(sale.quantity * sale.unit_price).toFixed(2)}</TableCell>
@@ -1428,7 +1443,10 @@ function DailySales() {
                       </Grid>
                       <Grid item xs={6}>
                         <Typography align="right">
-                          ${((Number(editingId ? editedSale.quantity : saleData.quantity) * Number(editingId ? editedSale.unit_price : saleData.unit_price)) || 0).toFixed(2)}
+                          ${(() => {
+                            const subtotal = (Number(editingId ? editedSale.quantity : saleData.quantity) * Number(editingId ? editedSale.unit_price : saleData.unit_price)) || 0;
+                            return subtotal.toFixed(2);
+                          })()}
                         </Typography>
                       </Grid>
 
@@ -1725,7 +1743,7 @@ function DailySales() {
                           Name
                         </Typography>
                         <Typography variant="body1">
-                          {detailsDialog.sale.customer?.name || 'N/A'}
+                          {detailsDialog.sale.customers?.name || 'N/A'}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
@@ -1733,7 +1751,7 @@ function DailySales() {
                           Phone Number
                         </Typography>
                         <Typography variant="body1">
-                          {detailsDialog.sale.customer?.phone || 'N/A'}
+                          {detailsDialog.sale.customers?.phone || 'N/A'}
                         </Typography>
                       </Grid>
                       <Grid item xs={12}>
@@ -1741,7 +1759,7 @@ function DailySales() {
                           Location
                         </Typography>
                         <Typography variant="body1">
-                          {detailsDialog.sale.customer?.location || 'N/A'}
+                          {detailsDialog.sale.customers?.location || 'N/A'}
                         </Typography>
                       </Grid>
                     </Grid>
@@ -1759,7 +1777,7 @@ function DailySales() {
                           Product
                         </Typography>
                         <Typography variant="body1">
-                          {detailsDialog.sale.product?.name || 'N/A'}
+                          {detailsDialog.sale.products?.name || 'N/A'}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
