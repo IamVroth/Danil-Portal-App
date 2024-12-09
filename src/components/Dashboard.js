@@ -289,12 +289,20 @@ function Dashboard() {
   }
 
   return (
-    <Box sx={{ width: '100%', mb: 4 }}>
+    <Box sx={{ 
+      width: '100%', 
+      mb: 4,
+      px: { xs: '0px', sm: 3 }, 
+      mx: 'auto', 
+      maxWidth: '1200px' 
+    }}>
       <Box sx={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
         alignItems: 'center',
-        mb: 3 
+        px: { xs: '20px', sm: 0 },
+        mb: 3,
+        width: '100%'
       }}>
         <Typography variant="h4" component="h1">
           Dashboard Overview
@@ -305,14 +313,16 @@ function Dashboard() {
       </Box>
 
       {/* Today's Stats */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
+      <Grid container spacing={{ xs: 2, sm: 3 }} sx={{ mb: 3 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Card sx={{ 
             height: '100%',
             background: theme.palette.mode === 'dark' 
               ? 'linear-gradient(45deg, #1a237e 30%, #283593 90%)'
               : 'linear-gradient(45deg, #42a5f5 30%, #64b5f6 90%)',
-            color: 'white'
+            color: 'white',
+            mx: { xs: '10px', sm: 0 }, 
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' } 
           }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -335,7 +345,9 @@ function Dashboard() {
             background: theme.palette.mode === 'dark'
               ? 'linear-gradient(45deg, #004d40 30%, #00695c 90%)'
               : 'linear-gradient(45deg, #26a69a 30%, #4db6ac 90%)',
-            color: 'white'
+            color: 'white',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
           }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -358,7 +370,9 @@ function Dashboard() {
             background: theme.palette.mode === 'dark'
               ? 'linear-gradient(45deg, #bf360c 30%, #d84315 90%)'
               : 'linear-gradient(45deg, #ff7043 30%, #ff8a65 90%)',
-            color: 'white'
+            color: 'white',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
           }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -381,7 +395,9 @@ function Dashboard() {
             background: theme.palette.mode === 'dark'
               ? 'linear-gradient(45deg, #1b5e20 30%, #2e7d32 90%)'
               : 'linear-gradient(45deg, #66bb6a 30%, #81c784 90%)',
-            color: 'white'
+            color: 'white',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
           }}>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
@@ -400,7 +416,12 @@ function Dashboard() {
       </Grid>
 
       {/* Date Range Selector */}
-      <Paper sx={{ p: 2, mb: 3 }}>
+      <Paper sx={{ 
+        p: { xs: 1.5, sm: 2 },
+        mb: 3,
+        mx: { xs: '10px', sm: 0 },
+        maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+      }}>
         <LocalizationProvider dateAdapter={AdapterDayjs}>
           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
             <DatePicker
@@ -419,10 +440,15 @@ function Dashboard() {
         </LocalizationProvider>
       </Paper>
 
-      <Grid container spacing={3}>
+      <Grid container spacing={{ xs: 2, sm: 3 }}>
         {/* Monthly Sales Performance */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 },
+            height: '100%',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+          }}>
             <Typography variant="h6" gutterBottom>
               Monthly Sales Performance
             </Typography>
@@ -462,7 +488,12 @@ function Dashboard() {
 
         {/* Daily Sales Performance */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 },
+            height: '100%',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+          }}>
             <Typography variant="h6" gutterBottom>
               Daily Sales Performance
             </Typography>
@@ -500,7 +531,12 @@ function Dashboard() {
 
         {/* Customer Distribution */}
         <Grid item xs={12} md={6}>
-          <Paper sx={{ p: 2, height: '100%' }}>
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 },
+            height: '100%',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+          }}>
             <Typography variant="h6" gutterBottom>
               Customer Distribution
             </Typography>
@@ -530,7 +566,11 @@ function Dashboard() {
 
         {/* Top Customer Card */}
         <Grid item xs={12} md={6}>
-          <Card sx={{ height: '100%' }}>
+          <Card sx={{ 
+            height: '100%',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+          }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
                 Top Customer
