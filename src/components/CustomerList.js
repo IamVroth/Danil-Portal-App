@@ -18,29 +18,50 @@ import {
   Box,
   Typography,
   useMediaQuery,
-  useTheme
+  useTheme,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Chip
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
 import AddIcon from '@mui/icons-material/Add';
+import dayjs from 'dayjs';
 import supabase from '../supabaseClient';
+
+// Constants for customer types
+const CUSTOMER_TYPES = {
+  NEW: 'new',
+  OLD: 'old'
+};
+
+// Function to determine customer type based on first purchase date
+const determineCustomerType = (firstPurchaseDate) => {
+  if (!firstPurchaseDate) return CUSTOMER_TYPES.NEW;
+  const threeMonthsAgo = dayjs().subtract(3, 'month');
+  return dayjs(firstPurchaseDate).isBefore(threeMonthsAgo) ? CUSTOMER_TYPES.OLD : CUSTOMER_TYPES.NEW;
+};
 
 function CustomerList() {
   const [customers, setCustomers] = useState([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [editingId, setEditingId] = useState(null);
-  const [editedCustomer, setEditedCustomer] = useState({});
   const [openNewDialog, setOpenNewDialog] = useState(false);
+  const [openEditDialog, setOpenEditDialog] = useState(false);
+  const [editedCustomer, setEditedCustomer] = useState({});
   const [newCustomer, setNewCustomer] = useState({
     name: '',
     email: '',
     phone: '',
-    location: ''
+    location: '',
+    customer_type: CUSTOMER_TYPES.NEW
   });
   const [loading, setLoading] = useState(true);
+  const [filterType, setFilterType] = useState('all');
   const theme = useTheme();
 
   useEffect(() => {
@@ -64,28 +85,62 @@ function CustomerList() {
 
       if (salesError) throw salesError;
 
+      console.log('Sales data:', salesData); // Debug log
+
       // Calculate purchase history for each customer
       const customersWithHistory = customersData.map(customer => {
         const customerSales = salesData.filter(sale => sale.customer_id === customer.id);
         const totalTransactions = customerSales.length;
-        const totalSpent = customerSales.reduce((sum, sale) => sum + (sale.quantity * sale.unit_price), 0);
-        const lastPurchaseDate = customerSales.length > 0 
-          ? Math.max(...customerSales.map(sale => new Date(sale.sale_date).getTime()))
-          : null;
+        
+        // Calculate total spent with discount
+        const totalSpent = customerSales.reduce((sum, sale) => {
+          // Debug logs
+          console.log('Processing sale:', sale);
+          console.log('Quantity:', sale.quantity);
+          console.log('Unit price:', sale.unit_price);
+          console.log('Discount type:', sale.discount_type);
+          console.log('Discount value:', sale.discount_value);
+
+          const subtotal = sale.quantity * sale.unit_price;
+          console.log('Subtotal:', subtotal);
+
+          let discountAmount = 0;
+          if (sale.discount_type === 'percentage') {
+            discountAmount = (sale.discount_value / 100) * subtotal;
+          } else if (sale.discount_type === 'fixed') {
+            discountAmount = sale.discount_value || 0;
+          }
+          console.log('Discount amount:', discountAmount);
+
+          const finalAmount = subtotal - discountAmount;
+          console.log('Final amount:', finalAmount);
+
+          return sum + finalAmount;
+        }, 0);
+
+        console.log(`Total spent for customer ${customer.name}:`, totalSpent); // Debug log
+        
+        // Find first and last purchase dates
+        const purchaseDates = customerSales.map(sale => new Date(sale.date).getTime());
+        const firstPurchaseDate = purchaseDates.length > 0 ? new Date(Math.min(...purchaseDates)) : null;
+        const lastPurchaseDate = purchaseDates.length > 0 ? new Date(Math.max(...purchaseDates)) : null;
 
         return {
           ...customer,
+          customer_type: customer.customer_type || CUSTOMER_TYPES.NEW,
           purchase_history: {
             total_transactions: totalTransactions,
             total_spent: totalSpent,
-            last_purchase_date: lastPurchaseDate ? new Date(lastPurchaseDate).toISOString() : null
+            first_purchase_date: firstPurchaseDate?.toISOString(),
+            last_purchase_date: lastPurchaseDate?.toISOString()
           }
         };
       });
 
       setCustomers(customersWithHistory || []);
     } catch (error) {
-      console.error('Error fetching customers:', error.message);
+      console.error('Error fetching customers:', error);
+      alert('Failed to fetch customers. Please refresh the page.');
     } finally {
       setLoading(false);
     }
@@ -96,17 +151,33 @@ function CustomerList() {
     try {
       const { data, error } = await supabase
         .from('customers')
-        .insert([newCustomer])
+        .insert([{
+          name: newCustomer.name,
+          email: newCustomer.email,
+          phone: newCustomer.phone,
+          location: newCustomer.location,
+          customer_type: CUSTOMER_TYPES.NEW // New customers are always "new"
+        }])
         .select();
 
       if (error) throw error;
 
-      setCustomers([...customers, data[0]]);
+      setCustomers([...customers, {
+        ...data[0],
+        purchase_history: {
+          total_transactions: 0,
+          total_spent: 0,
+          first_purchase_date: null,
+          last_purchase_date: null
+        }
+      }]);
+      
       setNewCustomer({
         name: '',
         email: '',
         phone: '',
-        location: ''
+        location: '',
+        customer_type: CUSTOMER_TYPES.NEW
       });
       setOpenNewDialog(false);
     } catch (error) {
@@ -115,30 +186,71 @@ function CustomerList() {
   };
 
   const handleEdit = (customer) => {
-    setEditingId(customer.id);
-    setEditedCustomer({ ...customer });
+    console.log('Editing customer:', customer); // Debug log
+    setEditedCustomer({ 
+      id: customer.id,
+      name: customer.name || '',
+      email: customer.email || '',
+      phone: customer.phone || '',
+      location: customer.location || '',
+      customer_type: customer.customer_type || CUSTOMER_TYPES.NEW
+    });
+    setOpenEditDialog(true);
   };
 
-  const handleSave = async (id) => {
+  const handleSave = async () => {
     try {
-      const { error } = await supabase
+      // Log the data being sent
+      console.log('Updating customer with ID:', editedCustomer.id);
+      
+      // Prepare update data including customer_type but without updated_at
+      const updateData = {
+        name: editedCustomer.name,
+        email: editedCustomer.email,
+        phone: editedCustomer.phone,
+        location: editedCustomer.location,
+        customer_type: editedCustomer.customer_type || CUSTOMER_TYPES.NEW
+      };
+
+      console.log('Update data:', updateData);
+
+      // Perform the update
+      const { data, error } = await supabase
         .from('customers')
-        .update({
-          name: editedCustomer.name,
-          email: editedCustomer.email,
-          phone: editedCustomer.phone,
-          location: editedCustomer.location
-        })
-        .eq('id', id);
+        .update(updateData)
+        .eq('id', editedCustomer.id)
+        .select()
+        .single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase update error:', error);
+        throw error;
+      }
 
-      setCustomers(customers.map(customer =>
-        customer.id === id ? editedCustomer : customer
-      ));
-      setEditingId(null);
+      if (!data) {
+        throw new Error('No data returned from update');
+      }
+
+      console.log('Successfully updated customer:', data);
+
+      // Update the customers list with the returned data
+      setCustomers(prevCustomers => 
+        prevCustomers.map(customer => 
+          customer.id === editedCustomer.id 
+            ? {
+                ...customer,
+                ...data,
+                purchase_history: customer.purchase_history
+              }
+            : customer
+        )
+      );
+      
+      setOpenEditDialog(false);
+      setEditedCustomer({});
     } catch (error) {
-      console.error('Error updating customer:', error.message);
+      console.error('Error updating customer:', error);
+      alert(`Failed to update customer: ${error.message || 'Please try again'}`);
     }
   };
 
@@ -157,65 +269,69 @@ function CustomerList() {
     }
   };
 
+  const filteredCustomers = customers.filter(customer => {
+    if (filterType === 'all') return true;
+    return customer.customer_type === filterType;
+  });
+
+  useEffect(() => {
+    console.log('Current editing id:', editedCustomer.id);
+    console.log('Current edited customer:', editedCustomer);
+  }, [editedCustomer]);
+
   return (
     <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto' }}>
-      <Typography variant="h4" sx={{ mb: 4, textAlign: 'center' }}>
-        Customers
-      </Typography>
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        mb: 4 
+      }}>
+        <Typography variant="h4">
+          Customers
+        </Typography>
+        <FormControl sx={{ minWidth: 120 }}>
+          <InputLabel>Filter Type</InputLabel>
+          <Select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value)}
+            label="Filter Type"
+            size="small"
+          >
+            <MenuItem value="all">All Customers</MenuItem>
+            <MenuItem value={CUSTOMER_TYPES.NEW}>New Customers</MenuItem>
+            <MenuItem value={CUSTOMER_TYPES.OLD}>Old Customers</MenuItem>
+          </Select>
+        </FormControl>
+      </Box>
       
-      <Paper 
-        elevation={3}
-        sx={{
-          width: '100%',
-          overflow: 'hidden',
-          backgroundColor: 'background.paper',
-          borderRadius: 2,
-        }}
-      >
+      <Paper elevation={3} sx={{ width: '100%', overflow: 'hidden', backgroundColor: 'background.paper', borderRadius: 2 }}>
         <TableContainer sx={{ maxHeight: 600 }}>
           <Table stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Name
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
+                  Type
+                </TableCell>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Email
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Phone
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Location
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Total Spent
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Last Purchase
                 </TableCell>
-                <TableCell sx={{ 
-                  fontWeight: 'bold',
-                  backgroundColor: 'background.paper',
-                }}>
+                <TableCell sx={{ fontWeight: 'bold', backgroundColor: 'background.paper' }}>
                   Actions
                 </TableCell>
               </TableRow>
@@ -223,86 +339,39 @@ function CustomerList() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={7} align="center">Loading...</TableCell>
+                  <TableCell colSpan={8} align="center">Loading...</TableCell>
                 </TableRow>
               ) : (
-                customers
+                filteredCustomers
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((customer) => (
                     <TableRow key={customer.id} hover>
+                      <TableCell>{customer.name}</TableCell>
                       <TableCell>
-                        {editingId === customer.id ? (
-                          <TextField
-                            size="small"
-                            value={editedCustomer.name}
-                            onChange={(e) => setEditedCustomer({ ...editedCustomer, name: e.target.value })}
-                          />
-                        ) : (
-                          customer.name
-                        )}
+                        <Chip 
+                          label={customer.customer_type === CUSTOMER_TYPES.NEW ? 'New' : 'Old'}
+                          color={customer.customer_type === CUSTOMER_TYPES.NEW ? 'primary' : 'default'}
+                          size="small"
+                        />
                       </TableCell>
-                      <TableCell>
-                        {editingId === customer.id ? (
-                          <TextField
-                            size="small"
-                            type="email"
-                            value={editedCustomer.email}
-                            onChange={(e) => setEditedCustomer({ ...editedCustomer, email: e.target.value })}
-                          />
-                        ) : (
-                          customer.email
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingId === customer.id ? (
-                          <TextField
-                            size="small"
-                            value={editedCustomer.phone}
-                            onChange={(e) => setEditedCustomer({ ...editedCustomer, phone: e.target.value })}
-                          />
-                        ) : (
-                          customer.phone
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingId === customer.id ? (
-                          <TextField
-                            size="small"
-                            value={editedCustomer.location}
-                            onChange={(e) => setEditedCustomer({ ...editedCustomer, location: e.target.value })}
-                          />
-                        ) : (
-                          customer.location
-                        )}
-                      </TableCell>
+                      <TableCell>{customer.email}</TableCell>
+                      <TableCell>{customer.phone}</TableCell>
+                      <TableCell>{customer.location}</TableCell>
                       <TableCell align="right">
                         ${customer.purchase_history?.total_spent?.toFixed(2) || '0.00'}
                       </TableCell>
                       <TableCell>
                         {customer.purchase_history?.last_purchase_date
-                          ? new Date(customer.purchase_history.last_purchase_date).toLocaleDateString()
+                          ? dayjs(customer.purchase_history.last_purchase_date).format('DD/MM/YYYY')
                           : 'Never'}
                       </TableCell>
                       <TableCell>
-                        {editingId === customer.id ? (
-                          <>
-                            <IconButton onClick={() => handleSave(customer.id)} size="small">
-                              <SaveIcon />
-                            </IconButton>
-                            <IconButton onClick={() => setEditingId(null)} size="small">
-                              <CancelIcon />
-                            </IconButton>
-                          </>
-                        ) : (
-                          <>
-                            <IconButton onClick={() => handleEdit(customer)} size="small">
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton onClick={() => handleDelete(customer.id)} size="small">
-                              <DeleteIcon />
-                            </IconButton>
-                          </>
-                        )}
+                        <IconButton onClick={() => handleEdit(customer)} size="small">
+                          <EditIcon />
+                        </IconButton>
+                        <IconButton onClick={() => handleDelete(customer.id)} size="small">
+                          <DeleteIcon />
+                        </IconButton>
                       </TableCell>
                     </TableRow>
                   ))
@@ -313,7 +382,7 @@ function CustomerList() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50]}
           component="div"
-          count={customers.length}
+          count={filteredCustomers.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(e, newPage) => setPage(newPage)}
@@ -324,20 +393,11 @@ function CustomerList() {
         />
       </Paper>
 
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: { xs: 'column', sm: 'row' }, 
-        justifyContent: 'space-between',
-        alignItems: { xs: 'stretch', sm: 'center' },
-        mb: 3,
-        gap: 2,
-        mt: 2
-      }}>
+      <Box sx={{ mt: 2 }}>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => setOpenNewDialog(true)}
-          sx={{ width: { xs: '100%', sm: 'auto' } }}
         >
           Add New Customer
         </Button>
@@ -348,23 +408,17 @@ function CustomerList() {
         onClose={() => setOpenNewDialog(false)}
         fullWidth
         maxWidth="sm"
-        fullScreen={useMediaQuery(theme => theme.breakpoints.down('sm'))}
       >
         <DialogTitle>Add New Customer</DialogTitle>
         <DialogContent>
-          <Box component="form" onSubmit={handleSubmit} sx={{ 
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 2,
-            mt: 2
-          }}>
+          <Box component="form" onSubmit={handleSubmit} sx={{ mt: 2 }}>
             <TextField
               fullWidth
               label="Name"
               value={newCustomer.name}
               onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-              margin="normal"
               required
+              sx={{ mb: 2 }}
             />
             <TextField
               fullWidth
@@ -372,27 +426,97 @@ function CustomerList() {
               type="email"
               value={newCustomer.email}
               onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
-              margin="normal"
+              sx={{ mb: 2 }}
             />
             <TextField
               fullWidth
               label="Phone"
               value={newCustomer.phone}
               onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
-              margin="normal"
+              sx={{ mb: 2 }}
             />
             <TextField
               fullWidth
               label="Location"
               value={newCustomer.location}
               onChange={(e) => setNewCustomer({ ...newCustomer, location: e.target.value })}
-              margin="normal"
+              multiline
+              rows={3}
             />
           </Box>
         </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
+        <DialogActions>
           <Button onClick={() => setOpenNewDialog(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit}>Save</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSubmit}
+            disabled={!newCustomer.name} // Disable if name is empty
+          >
+            Add Customer
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Customer Dialog */}
+      <Dialog 
+        open={openEditDialog} 
+        onClose={() => setOpenEditDialog(false)}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Edit Customer</DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              fullWidth
+              label="Name"
+              value={editedCustomer.name || ''}
+              onChange={(e) => setEditedCustomer(prev => ({ ...prev, name: e.target.value }))}
+              required
+            />
+            <TextField
+              fullWidth
+              label="Email"
+              type="email"
+              value={editedCustomer.email || ''}
+              onChange={(e) => setEditedCustomer(prev => ({ ...prev, email: e.target.value }))}
+            />
+            <TextField
+              fullWidth
+              label="Phone"
+              value={editedCustomer.phone || ''}
+              onChange={(e) => setEditedCustomer(prev => ({ ...prev, phone: e.target.value }))}
+            />
+            <TextField
+              fullWidth
+              label="Location"
+              value={editedCustomer.location || ''}
+              onChange={(e) => setEditedCustomer(prev => ({ ...prev, location: e.target.value }))}
+              multiline
+              rows={2}
+            />
+            <FormControl fullWidth>
+              <InputLabel>Customer Type</InputLabel>
+              <Select
+                value={editedCustomer.customer_type || CUSTOMER_TYPES.NEW}
+                onChange={(e) => setEditedCustomer(prev => ({ ...prev, customer_type: e.target.value }))}
+                label="Customer Type"
+              >
+                <MenuItem value={CUSTOMER_TYPES.NEW}>New</MenuItem>
+                <MenuItem value={CUSTOMER_TYPES.OLD}>Old</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenEditDialog(false)}>Cancel</Button>
+          <Button 
+            variant="contained" 
+            onClick={handleSave}
+            disabled={!editedCustomer.name}
+          >
+            Save Changes
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
