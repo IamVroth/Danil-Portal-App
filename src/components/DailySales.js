@@ -795,6 +795,21 @@ function DailySales() {
     return true;
   });
 
+  // Calculate total for display
+  const calculateTotal = (sale) => {
+    const subtotal = sale.quantity * sale.unit_price;
+    let discountAmount = 0;
+    
+    if (sale.discount_type === DISCOUNT_TYPES.PERCENTAGE) {
+      discountAmount = (subtotal * Number(sale.discount_value)) / 100;
+    } else if (sale.discount_type === DISCOUNT_TYPES.FIXED) {
+      discountAmount = Number(sale.discount_value);
+    }
+
+    const deliveryCharge = sale.is_promotional ? 0 : Number(sale.delivery_charge || 0);
+    return subtotal - discountAmount + deliveryCharge;
+  };
+
   if (isMobile && selectedSale) {
     return (
       <SaleDetailView
@@ -1101,13 +1116,15 @@ function DailySales() {
             </Grid>
           </Paper>
 
-          {/* Sales Table for Desktop */}
+          {/* Desktop View Table */}
           <TableContainer component={Paper} sx={{ mt: 3 }}>
             <Table>
               <TableHead>
                 <TableRow>
                   <TableCell>Date</TableCell>
                   <TableCell>Customer</TableCell>
+                  <TableCell>Location</TableCell>
+                  <TableCell>Phone</TableCell>
                   <TableCell>Product</TableCell>
                   <TableCell align="right">Quantity</TableCell>
                   <TableCell align="right">Unit Price</TableCell>
@@ -1116,46 +1133,45 @@ function DailySales() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {filteredSales
-                  .slice(page * rowsPerPage, (page + 1) * rowsPerPage)
-                  .map((sale) => (
-                    <TableRow key={sale.id}>
-                      <TableCell>{dayjs(sale.date).format('YYYY-MM-DD')}</TableCell>
-                      <TableCell>{sale.customers?.name}</TableCell>
-                      <TableCell>{sale.products?.name}</TableCell>
-                      <TableCell align="right">{sale.quantity}</TableCell>
-                      <TableCell align="right">${sale.unit_price}</TableCell>
-                      <TableCell align="right">${(sale.quantity * sale.unit_price).toFixed(2)}</TableCell>
-                      <TableCell>
-                        <IconButton onClick={(e) => {
-                          e.stopPropagation();
-                          handleEdit(sale);
-                        }} size="small">
-                          <EditIcon />
+                {(loading ? Array(5).fill({}) : filteredSales).map((sale, index) => (
+                  <TableRow
+                    key={sale.id || index}
+                    sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                  >
+                    <TableCell>{loading ? 'Loading...' : dayjs(sale.date).format('DD/MM/YYYY')}</TableCell>
+                    <TableCell>{loading ? 'Loading...' : sale.customers?.name || 'N/A'}</TableCell>
+                    <TableCell>{loading ? 'Loading...' : sale.customers?.location || 'N/A'}</TableCell>
+                    <TableCell>{loading ? 'Loading...' : sale.customers?.phone || 'N/A'}</TableCell>
+                    <TableCell>{loading ? 'Loading...' : sale.products?.name || 'N/A'}</TableCell>
+                    <TableCell align="right">{loading ? 'Loading...' : sale.quantity}</TableCell>
+                    <TableCell align="right">{loading ? 'Loading...' : `$${sale.unit_price}`}</TableCell>
+                    <TableCell align="right">
+                      {loading ? 'Loading...' : `$${calculateTotal(sale).toFixed(2)}`}
+                    </TableCell>
+                    <TableCell>
+                      <Box sx={{ display: 'flex', gap: 1 }}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleEdit(sale)}
+                          disabled={loading}
+                        >
+                          <EditIcon fontSize="small" />
                         </IconButton>
-                        <IconButton onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(sale.id);
-                        }} size="small">
-                          <DeleteIcon />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                        {sale.has_delivery && (
+                          <IconButton
+                            size="small"
+                            onClick={() => openStatusUpdateDialog(sale)}
+                            disabled={loading}
+                          >
+                            <LocalShippingIcon fontSize="small" />
+                          </IconButton>
+                        )}
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
-            <TablePagination
-              component="div"
-              count={filteredSales.length}
-              page={page}
-              onPageChange={(e, newPage) => setPage(newPage)}
-              rowsPerPage={rowsPerPage}
-              onRowsPerPageChange={(e) => {
-                setRowsPerPage(parseInt(e.target.value, 10));
-                setPage(0);
-              }}
-              rowsPerPageOptions={[5, 10, 25]}
-            />
           </TableContainer>
         </Box>
       )}
