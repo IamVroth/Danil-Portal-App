@@ -76,6 +76,7 @@ function Dashboard() {
     averageOrderValue: 0,
     monthlyEarnings: 0
   });
+  const [deliveryCostsByBusiness, setDeliveryCostsByBusiness] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -264,6 +265,41 @@ function Dashboard() {
         { name: 'Returning Customers', value: allCustomers.length - newCustomers }
       ]);
 
+      // Fetch delivery costs by business
+      const { data: deliveryCosts, error: deliveryError } = await supabase
+        .from('sales')
+        .select(`
+          delivery_cost,
+          delivery_companies (
+            id,
+            name
+          )
+        `)
+        .not('delivery_cost', 'is', null)
+        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+
+      if (deliveryError) throw deliveryError;
+
+      // Process delivery costs by business
+      const costsByBusiness = deliveryCosts.reduce((acc, sale) => {
+        if (sale.delivery_companies) {
+          const businessName = sale.delivery_companies.name;
+          if (!acc[businessName]) {
+            acc[businessName] = {
+              name: businessName,
+              totalCost: 0,
+              deliveries: 0
+            };
+          }
+          acc[businessName].totalCost += (sale.delivery_cost || 0);
+          acc[businessName].deliveries += 1;
+        }
+        return acc;
+      }, {});
+
+      setDeliveryCostsByBusiness(Object.values(costsByBusiness).sort((a, b) => b.totalCost - a.totalCost));
+
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     } finally {
@@ -440,52 +476,41 @@ function Dashboard() {
         </LocalizationProvider>
       </Paper>
 
-      <Grid container spacing={{ xs: 2, sm: 3 }}>
-        {/* Monthly Sales Performance */}
-        <Grid item xs={12} md={6}>
-          <Paper sx={{ 
-            p: { xs: 1.5, sm: 2 },
-            height: '100%',
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12}>
+          <Card sx={{ 
+            p: 3,
             mx: { xs: '10px', sm: 0 },
             maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
           }}>
-            <Typography variant="h6" gutterBottom>
-              Monthly Sales Performance
-            </Typography>
-            <Box sx={{ width: '100%', height: 400 }}>
-              <ResponsiveContainer>
-                <AreaChart
-                  data={monthlySalesData}
-                  margin={{
-                    top: 5,
-                    right: 30,
-                    left: 20,
-                    bottom: 5,
-                  }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis 
-                    dataKey="month"
-                    angle={-45}
-                    textAnchor="end"
-                    height={70}
-                  />
-                  <YAxis />
-                  <Tooltip />
-                  <Legend />
-                  <Area
-                    type="monotone"
-                    dataKey="sales"
-                    name="Sales ($)"
-                    stroke={theme.palette.primary.main}
-                    fill={theme.palette.primary.light}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </Box>
-          </Paper>
+            <Typography variant="h6" sx={{ mb: 3 }}>Monthly Sales Overview</Typography>
+            <Grid container spacing={2}>
+              {monthlySalesData.map((month, index) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
+                  <Card 
+                    elevation={2}
+                    sx={{ 
+                      p: 2,
+                      background: theme.palette.mode === 'dark' 
+                        ? 'linear-gradient(45deg, #1a237e 30%, #283593 90%)'
+                        : 'linear-gradient(45deg, #42a5f5 30%, #64b5f6 90%)',
+                      color: 'white'
+                    }}
+                  >
+                    <Typography variant="h6" sx={{ mb: 1 }}>{month.month}</Typography>
+                    <Typography variant="h4">${month.sales.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}</Typography>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
+          </Card>
         </Grid>
+      </Grid>
 
+      <Grid container spacing={{ xs: 2, sm: 3 }}>
         {/* Daily Sales Performance */}
         <Grid item xs={12} md={6}>
           <Paper sx={{ 
@@ -567,9 +592,14 @@ function Dashboard() {
         {/* Top Customer Card */}
         <Grid item xs={12} md={6}>
           <Card sx={{ 
-            height: '100%',
+            p: 3,
+            mb: 4,  
             mx: { xs: '10px', sm: 0 },
-            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' },
+            background: theme.palette.mode === 'dark' 
+              ? 'linear-gradient(45deg, #1a237e 30%, #283593 90%)'
+              : 'linear-gradient(45deg, #42a5f5 30%, #64b5f6 90%)',
+            color: 'white'
           }}>
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -605,6 +635,50 @@ function Dashboard() {
                 </Typography>
               )}
             </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Delivery Costs by Business */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12}>
+          <Card sx={{ 
+            p: 3,
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+          }}>
+            <Typography variant="h6" sx={{ mb: 3 }}>Delivery Costs by Business</Typography>
+            <Grid container spacing={2}>
+              {deliveryCostsByBusiness.map((business, index) => (
+                <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
+                  <Card 
+                    elevation={2}
+                    sx={{ 
+                      p: 2,
+                      background: theme.palette.mode === 'dark' 
+                        ? 'linear-gradient(45deg, #004d40 30%, #00695c 90%)'
+                        : 'linear-gradient(45deg, #26a69a 30%, #4db6ac 90%)',
+                      color: 'white'
+                    }}
+                  >
+                    <Typography variant="h6" sx={{ mb: 1 }}>{business.name}</Typography>
+                    <Typography variant="h4" sx={{ mb: 1 }}>${business.totalCost.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2
+                    })}</Typography>
+                    <Typography variant="body2">
+                      {business.deliveries} deliveries
+                    </Typography>
+                    <Typography variant="body2">
+                      Avg: ${(business.totalCost / business.deliveries).toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                      })}/delivery
+                    </Typography>
+                  </Card>
+                </Grid>
+              ))}
+            </Grid>
           </Card>
         </Grid>
       </Grid>
