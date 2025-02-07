@@ -28,6 +28,8 @@ import {
   LightMode as LightModeIcon,
   DarkMode as DarkModeIcon,
   LocalShipping as LocalShippingIcon,
+  ReceiptLong as ReceiptLongIcon,
+  ShoppingCart as ShoppingCartIcon,
 } from '@mui/icons-material';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useThemeContext } from '../contexts/ThemeContext';
@@ -62,7 +64,9 @@ const Navigation = () => {
     { text: 'Daily Sales', icon: <SaleIcon />, path: '/sales' },
     { text: 'Customers', icon: <PeopleIcon />, path: '/customers' },
     { text: 'Products', icon: <ProductsIcon />, path: '/products' },
-    { text: 'Delivery Companies', icon: <LocalShippingIcon />, path: '/delivery-companies' }
+    { text: 'Delivery Companies', icon: <LocalShippingIcon />, path: '/delivery-companies' },
+    { text: 'Expenses', icon: <ReceiptLongIcon />, path: '/expenses' },
+    { text: 'Purchases', icon: <ShoppingCartIcon />, path: '/purchases' }
   ];
 
   const drawer = (

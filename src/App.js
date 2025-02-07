@@ -9,6 +9,8 @@ import DailySales from './components/DailySales';
 import CustomerList from './components/CustomerList';
 import Products from './components/Products';
 import DeliveryCompanies from './components/DeliveryCompanies';
+import Expenses from './components/Expenses';
+import Purchases from './components/Purchases';
 import { CustomThemeProvider, useThemeContext } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/auth/Login';
@@ -55,6 +57,8 @@ function AppContent() {
                         <Route path="/customers" element={<CustomerList />} />
                         <Route path="/products" element={<Products />} />
                         <Route path="/delivery-companies" element={<DeliveryCompanies />} />
+                        <Route path="/expenses" element={<Expenses />} />
+                        <Route path="/purchases" element={<Purchases />} />
                       </Routes>
                     </Box>
                   </>

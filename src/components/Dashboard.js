@@ -77,6 +77,13 @@ function Dashboard() {
     monthlyEarnings: 0
   });
   const [deliveryCostsByBusiness, setDeliveryCostsByBusiness] = useState([]);
+  const [netIncome, setNetIncome] = useState({
+    income: 0,
+    expenses: 0,
+    purchases: 0,
+    total: 0,
+    percentageChange: 0
+  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -299,6 +306,51 @@ function Dashboard() {
       }, {});
 
       setDeliveryCostsByBusiness(Object.values(costsByBusiness).sort((a, b) => b.totalCost - a.totalCost));
+
+      // Fetch expenses for the date range
+      const { data: expensesData, error: expensesError } = await supabase
+        .from('expenses')
+        .select('amount, date')
+        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+
+      if (expensesError) throw expensesError;
+
+      // Fetch purchases for the date range
+      const { data: purchasesData, error: purchasesError } = await supabase
+        .from('purchases')
+        .select('total_amount, date')
+        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+
+      if (purchasesError) throw purchasesError;
+
+      // Calculate total expenses
+      const totalExpenses = expensesData.reduce((sum, expense) => sum + expense.amount, 0);
+      const totalPurchases = purchasesData.reduce((sum, purchase) => sum + purchase.total_amount, 0);
+      
+      // Calculate net income
+      const totalIncome = customerStats.totalSpent;
+      const netTotal = totalIncome - totalExpenses - totalPurchases;
+
+      // Calculate percentage change from previous period
+      const midPoint = Math.floor(salesData.length / 2);
+      const recentPeriod = salesData.slice(-midPoint);
+      const previousPeriod = salesData.slice(0, midPoint);
+
+      const recentIncome = recentPeriod.reduce((sum, sale) => sum + sale.total, 0);
+      const previousIncome = previousPeriod.reduce((sum, sale) => sum + sale.total, 0);
+
+      const percentageChange = previousIncome === 0 ? 0 : 
+        ((recentIncome - previousIncome) / previousIncome) * 100;
+
+      setNetIncome({
+        income: totalIncome,
+        expenses: totalExpenses,
+        purchases: totalPurchases,
+        total: netTotal,
+        percentageChange
+      });
 
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
@@ -638,6 +690,68 @@ function Dashboard() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* Net Income Card */}
+      <Card sx={{ 
+        p: 3,
+        mb: 4,
+        mx: { xs: '10px', sm: 0 },
+        maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' },
+        background: theme.palette.mode === 'dark' 
+          ? netIncome.total >= 0 
+            ? 'linear-gradient(45deg, #1b5e20 30%, #2e7d32 90%)'
+            : 'linear-gradient(45deg, #b71c1c 30%, #c62828 90%)'
+          : netIncome.total >= 0
+            ? 'linear-gradient(45deg, #66bb6a 30%, #81c784 90%)'
+            : 'linear-gradient(45deg, #ef5350 30%, #e57373 90%)',
+        color: 'white'
+      }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Box>
+            <Typography variant="h6" gutterBottom>Net Income</Typography>
+            <Typography variant="h3" sx={{ mb: 2 }}>
+              ${netIncome.total.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              {netIncome.percentageChange !== 0 && (
+                <>
+                  {netIncome.percentageChange > 0 ? (
+                    <TrendingUpIcon color="inherit" />
+                  ) : (
+                    <TrendingDownIcon color="inherit" />
+                  )}
+                  <Typography variant="body2">
+                    {Math.abs(netIncome.percentageChange).toFixed(1)}% from previous period
+                  </Typography>
+                </>
+              )}
+            </Box>
+          </Box>
+          <Box sx={{ textAlign: 'right' }}>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Total Income: ${netIncome.income.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Total Expenses: ${netIncome.expenses.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </Typography>
+            <Typography variant="body2">
+              Total Purchases: ${netIncome.purchases.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </Typography>
+          </Box>
+        </Box>
+      </Card>
 
       {/* Delivery Costs by Business */}
       <Grid container spacing={3} sx={{ mb: 3 }}>
