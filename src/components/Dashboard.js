@@ -63,6 +63,7 @@ function Dashboard() {
     startDate: dayjs().subtract(30, 'days'),
     endDate: dayjs()
   });
+  const [activeFilter, setActiveFilter] = useState('30days');
   const [customerStats, setCustomerStats] = useState({
     totalCustomers: 0,
     newCustomers: 0,
@@ -80,10 +81,12 @@ function Dashboard() {
   const [netIncome, setNetIncome] = useState({
     income: 0,
     expenses: 0,
+    deliveryCosts: 0,
     purchases: 0,
     total: 0,
     percentageChange: 0
   });
+  const [totalDeliveryCosts, setTotalDeliveryCosts] = useState(0);
 
   useEffect(() => {
     fetchDashboardData();
@@ -329,9 +332,13 @@ function Dashboard() {
       const totalExpenses = expensesData.reduce((sum, expense) => sum + expense.amount, 0);
       const totalPurchases = purchasesData.reduce((sum, purchase) => sum + purchase.total_amount, 0);
       
+      // Calculate total delivery costs
+      const totalDeliveryCosts = deliveryCosts.reduce((sum, sale) => sum + (sale.delivery_cost || 0), 0);
+      setTotalDeliveryCosts(totalDeliveryCosts);
+      
       // Calculate net income
       const totalIncome = customerStats.totalSpent;
-      const netTotal = totalIncome - totalExpenses - totalPurchases;
+      const netTotal = totalIncome - totalExpenses - totalPurchases - totalDeliveryCosts;
 
       // Calculate percentage change from previous period
       const midPoint = Math.floor(salesData.length / 2);
@@ -346,7 +353,8 @@ function Dashboard() {
 
       setNetIncome({
         income: totalIncome,
-        expenses: totalExpenses,
+        expenses: totalExpenses,  // Regular expenses without delivery costs
+        deliveryCosts: totalDeliveryCosts,  // Separate delivery costs
         purchases: totalPurchases,
         total: netTotal,
         percentageChange
@@ -366,6 +374,38 @@ function Dashboard() {
     const currentSum = currentPeriod.reduce((sum, item) => sum + item.sales, 0);
     const previousSum = previousPeriod.reduce((sum, item) => sum + item.sales, 0);
     return previousSum ? ((currentSum - previousSum) / previousSum) * 100 : 0;
+  };
+
+  const handleQuickFilter = (filter) => {
+    const today = dayjs();
+    let startDate, endDate;
+
+    switch (filter) {
+      case 'yesterday':
+        startDate = today.subtract(1, 'day').startOf('day');
+        endDate = today.subtract(1, 'day').endOf('day');
+        break;
+      case 'lastWeek':
+        startDate = today.subtract(1, 'week').startOf('week');
+        endDate = today.subtract(1, 'week').endOf('week');
+        break;
+      case 'thisMonth':
+        startDate = today.startOf('month');
+        endDate = today;
+        break;
+      case 'lastMonth':
+        startDate = today.subtract(1, 'month').startOf('month');
+        endDate = today.subtract(1, 'month').endOf('month');
+        break;
+      case '30days':
+      default:
+        startDate = today.subtract(30, 'days');
+        endDate = today;
+        break;
+    }
+
+    setDateRange({ startDate, endDate });
+    setActiveFilter(filter);
   };
 
   if (loading) {
@@ -504,36 +544,117 @@ function Dashboard() {
       </Grid>
 
       {/* Date Range Selector */}
-      <Paper sx={{ 
-        p: { xs: 1.5, sm: 2 },
-        mb: 3,
-        mx: { xs: '10px', sm: 0 },
-        maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
-      }}>
-        <LocalizationProvider dateAdapter={AdapterDayjs}>
-          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-            <DatePicker
-              label="Start Date"
-              value={dateRange.startDate}
-              onChange={(newValue) => setDateRange(prev => ({ ...prev, startDate: newValue }))}
-              renderInput={(params) => <TextField {...params} />}
-            />
-            <DatePicker
-              label="End Date"
-              value={dateRange.endDate}
-              onChange={(newValue) => setDateRange(prev => ({ ...prev, endDate: newValue }))}
-              renderInput={(params) => <TextField {...params} />}
-            />
-          </Stack>
-        </LocalizationProvider>
-      </Paper>
+      <Grid container spacing={2} sx={{ mb: 3 }}>
+        <Grid item xs={12}>
+          <Paper sx={{ p: 3 }}>
+            <Stack 
+              direction={{ xs: 'column', md: 'row' }} 
+              spacing={{ xs: 2, md: 3 }} 
+              alignItems={{ xs: 'stretch', md: 'center' }}
+              divider={<Divider orientation="vertical" flexItem />}
+            >
+              <Stack 
+                direction={{ xs: 'column', sm: 'row' }} 
+                spacing={2} 
+                sx={{ 
+                  minWidth: { sm: '320px' },
+                  width: { xs: '100%', md: 'auto' }
+                }}
+              >
+                <LocalizationProvider dateAdapter={AdapterDayjs}>
+                  <DatePicker
+                    label="Start Date"
+                    value={dateRange.startDate}
+                    onChange={(newValue) => {
+                      setDateRange(prev => ({ ...prev, startDate: newValue }));
+                      setActiveFilter('custom');
+                    }}
+                    slotProps={{ 
+                      textField: { 
+                        size: "small",
+                        fullWidth: true,
+                        sx: { minWidth: '140px' }
+                      } 
+                    }}
+                  />
+                  <DatePicker
+                    label="End Date"
+                    value={dateRange.endDate}
+                    onChange={(newValue) => {
+                      setDateRange(prev => ({ ...prev, endDate: newValue }));
+                      setActiveFilter('custom');
+                    }}
+                    slotProps={{ 
+                      textField: { 
+                        size: "small",
+                        fullWidth: true,
+                        sx: { minWidth: '140px' }
+                      } 
+                    }}
+                  />
+                </LocalizationProvider>
+              </Stack>
+              <Stack 
+                direction={{ xs: 'column', sm: 'row' }} 
+                spacing={1.5}
+                sx={{ 
+                  flex: 1,
+                  justifyContent: 'flex-end',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  '& > button': {
+                    minWidth: { xs: '100%', sm: '110px' },
+                    flex: { sm: '0 0 auto' }
+                  }
+                }}
+              >
+                <Button
+                  variant={activeFilter === 'yesterday' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('yesterday')}
+                  size="small"
+                >
+                  Yesterday
+                </Button>
+                <Button
+                  variant={activeFilter === 'lastWeek' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('lastWeek')}
+                  size="small"
+                >
+                  Last Week
+                </Button>
+                <Button
+                  variant={activeFilter === 'thisMonth' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('thisMonth')}
+                  size="small"
+                >
+                  This Month
+                </Button>
+                <Button
+                  variant={activeFilter === 'lastMonth' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('lastMonth')}
+                  size="small"
+                >
+                  Last Month
+                </Button>
+                <Button
+                  variant={activeFilter === '30days' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('30days')}
+                  size="small"
+                >
+                  Last 30 Days
+                </Button>
+              </Stack>
+            </Stack>
+          </Paper>
+        </Grid>
+      </Grid>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12}>
           <Card sx={{ 
             p: 3,
             mx: { xs: '10px', sm: 0 },
-            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' }
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' } 
           }}>
             <Typography variant="h6" sx={{ mb: 3 }}>Monthly Sales Overview</Typography>
             <Grid container spacing={2}>
@@ -738,7 +859,13 @@ function Dashboard() {
               })}
             </Typography>
             <Typography variant="body2" sx={{ mb: 1 }}>
-              Total Expenses: ${netIncome.expenses.toLocaleString(undefined, {
+              Total Expenses: ${(netIncome.expenses).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+              })}
+            </Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Total Delivery Costs: ${netIncome.deliveryCosts.toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2
               })}

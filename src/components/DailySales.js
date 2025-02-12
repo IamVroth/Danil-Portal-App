@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Paper,
   Typography,
@@ -28,8 +28,12 @@ import {
   Alert,
   Divider,
   InputAdornment,
+  Autocomplete,
+  ListSubheader,
+  CircularProgress,
 } from '@mui/material';
-import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import {
+  AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import EditIcon from '@mui/icons-material/Edit';
@@ -810,6 +814,55 @@ function DailySales() {
     return subtotal - discountAmount + deliveryCharge;
   };
 
+  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
+
+  // Debounced search function for customers
+  const debouncedCustomerSearch = useCallback(
+    debounce(async (searchQuery) => {
+      if (!searchQuery) return;
+      setIsLoadingCustomers(true);
+      try {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('id, name, phone, location')
+          .ilike('name', `%${searchQuery}%`)
+          .order('name')
+          .limit(50);
+
+        if (error) throw error;
+        setCustomers(data || []);
+      } catch (error) {
+        console.error('Error searching customers:', error.message);
+        showSnackbar('Error searching customers', 'error');
+      } finally {
+        setIsLoadingCustomers(false);
+      }
+    }, 300),
+    []
+  );
+
+  // Memoized filtered customers
+  const filteredCustomers = useMemo(() => {
+    if (!customerSearchQuery) return customers;
+    return customers.filter(customer =>
+      customer.name.toLowerCase().includes(customerSearchQuery.toLowerCase())
+    );
+  }, [customers, customerSearchQuery]);
+
+  // Helper function for debouncing
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
   if (isMobile && selectedSale) {
     return (
       <SaleDetailView
@@ -1202,20 +1255,80 @@ function DailySales() {
                 </Grid>
                 <Grid item xs={12}>
                   <Box sx={{ display: 'flex', gap: 1 }}>
-                    <FormControl fullWidth>
-                      <InputLabel>Customer</InputLabel>
-                      <Select
-                        value={editingId ? editedSale.customer_id : saleData.customer_id}
-                        onChange={(e) => editingId ? setEditedSale({ ...editedSale, customer_id: e.target.value }) : setSaleData({ ...saleData, customer_id: e.target.value })}
-                        label="Customer"
-                      >
-                        {customers.map((customer) => (
-                          <MenuItem key={customer.id} value={customer.id}>
-                            {customer.name}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
+                    <Autocomplete
+                      fullWidth
+                      options={filteredCustomers}
+                      getOptionLabel={(option) => option.name}
+                      value={customers.find(c => c.id === (editingId ? editedSale.customer_id : saleData.customer_id)) || null}
+                      onChange={(_, newValue) => {
+                        if (editingId) {
+                          setEditedSale({ ...editedSale, customer_id: newValue?.id || '' });
+                        } else {
+                          setSaleData({ ...saleData, customer_id: newValue?.id || '' });
+                        }
+                      }}
+                      onInputChange={(_, newInputValue) => {
+                        setCustomerSearchQuery(newInputValue);
+                        debouncedCustomerSearch(newInputValue);
+                      }}
+                      loading={isLoadingCustomers}
+                      filterOptions={(options) => options}
+                      disableListWrap
+                      componentsProps={{
+                        popper: {
+                          placement: 'bottom-start',
+                          modifiers: [
+                            { name: 'flip', enabled: false },
+                            { name: 'preventOverflow', enabled: false }
+                          ]
+                        }
+                      }}
+                      slotProps={{
+                        paper: {
+                          sx: {
+                            maxHeight: '400px',
+                            '& .MuiAutocomplete-listbox': {
+                              maxHeight: '400px',
+                              scrollBehavior: 'smooth',
+                              '& .MuiAutocomplete-option': {
+                                paddingY: 1
+                              }
+                            }
+                          }
+                        }
+                      }}
+                      renderOption={(props, option) => (
+                        <li {...props} style={{ padding: '8px 16px' }}>
+                          <Box>
+                            <Typography variant="body1">{option.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {option.phone} • {option.location}
+                            </Typography>
+                          </Box>
+                        </li>
+                      )}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Customer"
+                          placeholder="Search customer..."
+                          InputProps={{
+                            ...params.InputProps,
+                            endAdornment: (
+                              <React.Fragment>
+                                {isLoadingCustomers ? (
+                                  <CircularProgress color="inherit" size={20} />
+                                ) : null}
+                                {params.InputProps.endAdornment}
+                              </React.Fragment>
+                            ),
+                          }}
+                        />
+                      )}
+                      ListboxProps={{
+                        style: { padding: 0 }
+                      }}
+                    />
                     <Button
                       variant="contained"
                       onClick={handleOpenCustomerDialog}
