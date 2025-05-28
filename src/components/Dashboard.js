@@ -63,6 +63,11 @@ function Dashboard() {
     startDate: dayjs().subtract(30, 'days'),
     endDate: dayjs()
   });
+  // Add a separate state for the displayed date range (what's actually used for filtering)
+  const [displayedDateRange, setDisplayedDateRange] = useState({
+    startDate: dayjs().subtract(30, 'days'),
+    endDate: dayjs()
+  });
   const [activeFilter, setActiveFilter] = useState('30days');
   const [customerStats, setCustomerStats] = useState({
     totalCustomers: 0,
@@ -87,10 +92,11 @@ function Dashboard() {
     percentageChange: 0
   });
   const [totalDeliveryCosts, setTotalDeliveryCosts] = useState(0);
+  const [expensesChartData, setExpensesChartData] = useState([]);
 
   useEffect(() => {
     fetchDashboardData();
-  }, [dateRange]);
+  }, [displayedDateRange]);
 
   const fetchDashboardData = async () => {
     try {
@@ -241,12 +247,34 @@ function Dashboard() {
       const topCustomer = Object.entries(customerStats.customerSpending)
         .sort(([, a], [, b]) => b.total - a.total)[0];
 
-      // Fetch all customers for total count
-      const { data: allCustomers, error: customerError } = await supabase
-        .from('customers')
-        .select('id, created_at');
-
-      if (customerError) throw customerError;
+      // Fetch all customers for total count with pagination to handle more than 1000 records
+      let allCustomers = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error, count } = await supabase
+          .from('customers')
+          .select('id, created_at', { count: 'exact' })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allCustomers = [...allCustomers, ...data];
+          page++;
+          hasMore = data.length === pageSize;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      console.log(`Total customers fetched: ${allCustomers.length}`);
+      
+      if (allCustomers.length === 0) {
+        console.error('No customers found or error fetching customers');
+      }
 
       // Count new vs returning customers
       const newCustomers = allCustomers.filter(c => 
@@ -339,17 +367,58 @@ function Dashboard() {
       // Calculate net income
       const totalIncome = customerStats.totalSpent;
       const netTotal = totalIncome - totalExpenses - totalPurchases - totalDeliveryCosts;
+      
+      // Prepare data for expenses chart
+      const expensesChartItems = [
+        { name: 'Regular Expenses', value: totalExpenses },
+        { name: 'Delivery Costs', value: totalDeliveryCosts },
+        { name: 'Purchases', value: totalPurchases }
+      ].filter(item => item.value > 0); // Only include categories with values > 0
+      
+      setExpensesChartData(expensesChartItems);
 
-      // Calculate percentage change from previous period
-      const midPoint = Math.floor(salesData.length / 2);
-      const recentPeriod = salesData.slice(-midPoint);
-      const previousPeriod = salesData.slice(0, midPoint);
-
-      const recentIncome = recentPeriod.reduce((sum, sale) => sum + sale.total, 0);
-      const previousIncome = previousPeriod.reduce((sum, sale) => sum + sale.total, 0);
-
-      const percentageChange = previousIncome === 0 ? 0 : 
-        ((recentIncome - previousIncome) / previousIncome) * 100;
+      // Calculate percentage change from previous period based on the exact same date range
+      // Calculate the duration of the selected period in days
+      const selectedStartDate = dateRange.startDate;
+      const selectedEndDate = dateRange.endDate;
+      const durationInDays = selectedEndDate.diff(selectedStartDate, 'day') + 1;
+      
+      // Calculate the previous period with the same duration
+      const previousPeriodEndDate = selectedStartDate.subtract(1, 'day');
+      const previousPeriodStartDate = previousPeriodEndDate.subtract(durationInDays - 1, 'day');
+      
+      console.log('Current period:', selectedStartDate.format('YYYY-MM-DD'), 'to', selectedEndDate.format('YYYY-MM-DD'), `(${durationInDays} days)`);
+      console.log('Previous period:', previousPeriodStartDate.format('YYYY-MM-DD'), 'to', previousPeriodEndDate.format('YYYY-MM-DD'), `(${durationInDays} days)`);
+      
+      // Fetch sales data for the previous period
+      let previousPeriodIncome = 0;
+      try {
+        const { data: previousSalesData, error: previousSalesError } = await supabase
+          .from('sales')
+          .select('*')
+          .gte('date', previousPeriodStartDate.format('YYYY-MM-DD'))
+          .lte('date', previousPeriodEndDate.format('YYYY-MM-DD'));
+          
+        if (!previousSalesError && previousSalesData) {
+          // Calculate total income for previous period
+          previousPeriodIncome = previousSalesData.reduce((sum, sale) => {
+            const subtotal = sale.quantity * sale.unit_price;
+            const discountAmount = sale.discount_type === 'percentage' 
+              ? (subtotal * sale.discount_value) / 100 
+              : (sale.discount_value || 0);
+            return sum + (subtotal - discountAmount);
+          }, 0);
+        }
+      } catch (error) {
+        console.error('Error fetching previous period data:', error);
+      }
+      
+      // Current period income is already calculated as totalIncome
+      const currentPeriodIncome = totalIncome;
+      
+      // Calculate percentage change
+      const percentageChange = previousPeriodIncome === 0 ? 0 : 
+        ((currentPeriodIncome - previousPeriodIncome) / previousPeriodIncome) * 100;
 
       setNetIncome({
         income: totalIncome,
@@ -379,7 +448,8 @@ function Dashboard() {
   const handleQuickFilter = (filter) => {
     const today = dayjs();
     let startDate, endDate;
-
+    
+    // When using quick filters, we update both states immediately
     switch (filter) {
       case 'yesterday':
         startDate = today.subtract(1, 'day').startOf('day');
@@ -398,13 +468,28 @@ function Dashboard() {
         endDate = today.subtract(1, 'month').endOf('month');
         break;
       case '30days':
+        startDate = today.subtract(30, 'days');
+        endDate = today;
+        break;
+      case '3months':
+        startDate = today.subtract(3, 'month');
+        endDate = today;
+        break;
+      case 'maximum':
+        // Fetch the earliest possible date from the database
+        // For now, set a reasonable default like 5 years back
+        startDate = today.subtract(5, 'year');
+        endDate = today;
+        break;
       default:
         startDate = today.subtract(30, 'days');
         endDate = today;
         break;
     }
 
+    // Update both states when using quick filters
     setDateRange({ startDate, endDate });
+    setDisplayedDateRange({ startDate, endDate });
     setActiveFilter(filter);
   };
 
@@ -562,36 +647,53 @@ function Dashboard() {
                 }}
               >
                 <LocalizationProvider dateAdapter={AdapterDayjs}>
-                  <DatePicker
-                    label="Start Date"
-                    value={dateRange.startDate}
-                    onChange={(newValue) => {
-                      setDateRange(prev => ({ ...prev, startDate: newValue }));
-                      setActiveFilter('custom');
-                    }}
-                    slotProps={{ 
-                      textField: { 
-                        size: "small",
-                        fullWidth: true,
-                        sx: { minWidth: '140px' }
-                      } 
-                    }}
-                  />
-                  <DatePicker
-                    label="End Date"
-                    value={dateRange.endDate}
-                    onChange={(newValue) => {
-                      setDateRange(prev => ({ ...prev, endDate: newValue }));
-                      setActiveFilter('custom');
-                    }}
-                    slotProps={{ 
-                      textField: { 
-                        size: "small",
-                        fullWidth: true,
-                        sx: { minWidth: '140px' }
-                      } 
-                    }}
-                  />
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                      <DatePicker
+                        label="Start Date"
+                        value={dateRange.startDate}
+                        onChange={(newValue) => {
+                          setDateRange(prev => ({ ...prev, startDate: newValue }));
+                          // Don't update displayed date range or active filter yet
+                        }}
+                        slotProps={{ 
+                          textField: { 
+                            size: "small",
+                            fullWidth: true,
+                            sx: { minWidth: '140px' }
+                          } 
+                        }}
+                      />
+                      <DatePicker
+                        label="End Date"
+                        value={dateRange.endDate}
+                        onChange={(newValue) => {
+                          setDateRange(prev => ({ ...prev, endDate: newValue }));
+                          // Don't update displayed date range or active filter yet
+                        }}
+                        slotProps={{ 
+                          textField: { 
+                            size: "small",
+                            fullWidth: true,
+                            sx: { minWidth: '140px' }
+                          } 
+                        }}
+                      />
+                    </Stack>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => {
+                        // Only update displayed date range and trigger data fetch when Apply is clicked
+                        setDisplayedDateRange(dateRange);
+                        setActiveFilter('custom');
+                      }}
+                      size="small"
+                      sx={{ height: '40px', minWidth: '80px' }}
+                    >
+                      Apply
+                    </Button>
+                  </Stack>
                 </LocalizationProvider>
               </Stack>
               <Stack 
@@ -642,6 +744,20 @@ function Dashboard() {
                   size="small"
                 >
                   Last 30 Days
+                </Button>
+                <Button
+                  variant={activeFilter === '3months' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('3months')}
+                  size="small"
+                >
+                  Last 3 Months
+                </Button>
+                <Button
+                  variant={activeFilter === 'maximum' ? 'contained' : 'outlined'}
+                  onClick={() => handleQuickFilter('maximum')}
+                  size="small"
+                >
+                  Maximum
                 </Button>
               </Stack>
             </Stack>
@@ -780,27 +896,15 @@ function Dashboard() {
               </Typography>
               {customerStats.topCustomer ? (
                 <>
-                  <Typography variant="h5" sx={{ mb: 2 }}>
+                  <Typography variant="h4" sx={{ mb: 2 }}>
                     {customerStats.topCustomer.name}
                   </Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Total Spent
-                      </Typography>
-                      <Typography variant="h6">
-                        ${customerStats.topCustomer.total.toFixed(2)}
-                      </Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">
-                        Orders
-                      </Typography>
-                      <Typography variant="h6">
-                        {customerStats.topCustomer.orders}
-                      </Typography>
-                    </Grid>
-                  </Grid>
+                  <Typography variant="body1">
+                    Total Spent: ${customerStats.topCustomer.total.toFixed(2)}
+                  </Typography>
+                  <Typography variant="body1">
+                    Orders: {customerStats.topCustomer.orders}
+                  </Typography>
                 </>
               ) : (
                 <Typography variant="body1" color="text.secondary">
@@ -810,23 +914,99 @@ function Dashboard() {
             </CardContent>
           </Card>
         </Grid>
+
+        {/* Expenses Chart */}
+        <Grid item xs={12} md={6}>
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 },
+            height: '100%',
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' },
+            display: 'flex',
+            flexDirection: 'column'
+          }}>
+            <Typography variant="h6" gutterBottom>
+              Expenses Breakdown
+            </Typography>
+            <Box sx={{ 
+              width: '100%', 
+              flexGrow: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              minHeight: 300
+            }}>
+              {expensesChartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                    <Pie
+                      data={expensesChartData}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={true}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                      label={false} // Remove inline labels for cleaner look
+                    >
+                      {expensesChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value) => `$${value.toFixed(2)}`}
+                      labelFormatter={(name) => `${name}`}
+                    />
+                    <Legend 
+                      layout="vertical"
+                      verticalAlign="middle"
+                      align="right"
+                      wrapperStyle={{
+                        paddingLeft: '20px',
+                      }}
+                      formatter={(value, entry, index) => {
+                        const { payload } = entry;
+                        return (
+                          <span style={{ color: theme.palette.text.primary, marginRight: 10 }}>
+                            {payload.name}: ${payload.value.toFixed(2)} ({(payload.value / expensesChartData.reduce((sum, item) => sum + item.value, 0) * 100).toFixed(0)}%)
+                          </span>
+                        );
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+                  <Typography variant="body1" color="text.secondary">
+                    No expense data available for the selected period
+                  </Typography>
+                </Box>
+              )}
+            </Box>
+          </Paper>
+        </Grid>
       </Grid>
 
-      {/* Net Income Card */}
-      <Card sx={{ 
-        p: 3,
-        mb: 4,
-        mx: { xs: '10px', sm: 0 },
-        maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' },
-        background: theme.palette.mode === 'dark' 
-          ? netIncome.total >= 0 
-            ? 'linear-gradient(45deg, #1b5e20 30%, #2e7d32 90%)'
-            : 'linear-gradient(45deg, #b71c1c 30%, #c62828 90%)'
-          : netIncome.total >= 0
-            ? 'linear-gradient(45deg, #66bb6a 30%, #81c784 90%)'
-            : 'linear-gradient(45deg, #ef5350 30%, #e57373 90%)',
-        color: 'white'
-      }}>
+      {/* Add margin between card sections */}
+      <Box sx={{ mb: 4 }} />
+
+      {/* Net Income Card - In its own Grid container for proper spacing */}
+      <Grid container spacing={3}>
+        <Grid item xs={12}>
+          <Card sx={{ 
+            p: 3,
+            mx: { xs: '10px', sm: 0 },
+            maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' },
+            background: theme.palette.mode === 'dark' 
+              ? netIncome.total >= 0 
+                ? 'linear-gradient(45deg, #1b5e20 30%, #2e7d32 90%)'
+                : 'linear-gradient(45deg, #b71c1c 30%, #c62828 90%)'
+              : netIncome.total >= 0
+                ? 'linear-gradient(45deg, #66bb6a 30%, #81c784 90%)'
+                : 'linear-gradient(45deg, #ef5350 30%, #e57373 90%)',
+            color: 'white'
+          }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <Box>
             <Typography variant="h6" gutterBottom>Net Income</Typography>
@@ -879,6 +1059,8 @@ function Dashboard() {
           </Box>
         </Box>
       </Card>
+        </Grid>
+      </Grid>
 
       {/* Delivery Costs by Business */}
       <Grid container spacing={3} sx={{ mb: 3 }}>

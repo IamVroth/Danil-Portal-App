@@ -79,14 +79,15 @@ const Navigation = () => {
         gap: 2
       }}>
         <Avatar 
+          src="https://drive.google.com/uc?export=view&id=1ZcKxYvaosewmTmLBU10sOdseydU0kiyE"
           sx={{ 
-            bgcolor: 'primary.main',
-            width: 40,
-            height: 40,
+            width: 48,
+            height: 48,
+            border: '1px solid',
+            borderColor: 'divider'
           }}
-        >
-          S
-        </Avatar>
+          variant="rounded"
+        />
         <Typography variant="h6" sx={{ 
           color: 'text.primary',
           fontSize: '1.2rem',

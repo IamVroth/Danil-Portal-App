@@ -124,6 +124,7 @@ function DailySales() {
   
   // Add states for quick date filters
   const [quickDateFilter, setQuickDateFilter] = useState('thisMonth');
+  const [searchTerm, setSearchTerm] = useState('');
   
   // Quick-add dialogs state
   const [openProductDialog, setOpenProductDialog] = useState(false);
@@ -793,11 +794,56 @@ function DailySales() {
   };
 
   const filteredSales = sales.filter(sale => {
+    // Apply location filter if selected
     if (selectedLocation && sale.customers?.location !== selectedLocation) {
       return false;
     }
+    
+    // Apply search filter if search term exists
+    if (searchTerm.trim() !== '') {
+      const search = searchTerm.toLowerCase();
+      return (
+        (sale.customers?.name && sale.customers.name.toLowerCase().includes(search)) ||
+        (sale.products?.name && sale.products.name.toLowerCase().includes(search)) ||
+        (sale.customers?.phone && sale.customers.phone.toLowerCase().includes(search)) ||
+        (sale.customers?.location && sale.customers.location.toLowerCase().includes(search))
+      );
+    }
+    
     return true;
   });
+  
+  // Sort sales based on search relevance if search term exists
+  const sortedSales = searchTerm.trim() !== '' 
+    ? [...filteredSales].sort((a, b) => {
+        const searchLower = searchTerm.toLowerCase();
+        
+        // Check for customer name matches
+        const aNameLower = (a.customers?.name || '').toLowerCase();
+        const bNameLower = (b.customers?.name || '').toLowerCase();
+        
+        // Exact match gets highest priority
+        if (aNameLower === searchLower && bNameLower !== searchLower) return -1;
+        if (bNameLower === searchLower && aNameLower !== searchLower) return 1;
+        
+        // Starts with gets second priority
+        if (aNameLower.startsWith(searchLower) && !bNameLower.startsWith(searchLower)) return -1;
+        if (bNameLower.startsWith(searchLower) && !aNameLower.startsWith(searchLower)) return 1;
+        
+        // Check for product name matches
+        const aProductLower = (a.products?.name || '').toLowerCase();
+        const bProductLower = (b.products?.name || '').toLowerCase();
+        
+        if (aProductLower === searchLower && bProductLower !== searchLower) return -1;
+        if (bProductLower === searchLower && aProductLower !== searchLower) return 1;
+        
+        if (aProductLower.startsWith(searchLower) && !bProductLower.startsWith(searchLower)) return -1;
+        if (bProductLower.startsWith(searchLower) && !aProductLower.startsWith(searchLower)) return 1;
+        
+        // If same level of match, sort by date (newest first)
+        return new Date(b.date) - new Date(a.date);
+      })
+    : filteredSales;
 
   // Calculate total for display
   const calculateTotal = (sale) => {
@@ -817,37 +863,96 @@ function DailySales() {
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
 
-  // Debounced search function for customers
+  // Debounced search function for customers with shorter delay for better responsiveness
   const debouncedCustomerSearch = useCallback(
     debounce(async (searchQuery) => {
-      if (!searchQuery) return;
+      // Always run the search, even for empty query (to reset the list)
       setIsLoadingCustomers(true);
       try {
+        // If search is empty, fetch a limited set of customers
+        if (!searchQuery || searchQuery.trim() === '') {
+          const { data, error } = await supabase
+            .from('customers')
+            .select('id, name, phone, location')
+            .order('name')
+            .limit(50);
+          
+          if (error) throw error;
+          setCustomers(data || []);
+          return;
+        }
+        
+        const searchTerm = searchQuery.toLowerCase().trim();
+        
+        // Get all customers that match the search term
         const { data, error } = await supabase
           .from('customers')
           .select('id, name, phone, location')
-          .ilike('name', `%${searchQuery}%`)
-          .order('name')
-          .limit(50);
+          .ilike('name', `%${searchTerm}%`)
+          .limit(100);
 
         if (error) throw error;
-        setCustomers(data || []);
+        
+        // Custom sorting function that prioritizes exact matches and starts-with matches
+        const sortedData = [...(data || [])].sort((a, b) => {
+          const aName = (a.name || '').toLowerCase();
+          const bName = (b.name || '').toLowerCase();
+          
+          // First priority: exact match with the search term (case insensitive)
+          if (aName === searchTerm && bName !== searchTerm) return -1;
+          if (bName === searchTerm && aName !== searchTerm) return 1;
+          
+          // Second priority: starts with the search term
+          if (aName.startsWith(searchTerm) && !bName.startsWith(searchTerm)) return -1;
+          if (bName.startsWith(searchTerm) && !aName.startsWith(searchTerm)) return 1;
+          
+          // Third priority: contains the search term as a separate word
+          const aHasWord = aName.split(' ').some(word => word.toLowerCase() === searchTerm);
+          const bHasWord = bName.split(' ').some(word => word.toLowerCase() === searchTerm);
+          if (aHasWord && !bHasWord) return -1;
+          if (bHasWord && !aHasWord) return 1;
+          
+          // If same level of match, sort alphabetically
+          return aName.localeCompare(bName);
+        });
+        
+        setCustomers(sortedData);
       } catch (error) {
         console.error('Error searching customers:', error.message);
         showSnackbar('Error searching customers', 'error');
       } finally {
         setIsLoadingCustomers(false);
       }
-    }, 300),
+    }, 150), // Reduced debounce time for better responsiveness
     []
   );
 
-  // Memoized filtered customers
+  // Memoized filtered and sorted customers
   const filteredCustomers = useMemo(() => {
     if (!customerSearchQuery) return customers;
-    return customers.filter(customer =>
+    
+    // First filter customers that match the search query
+    const filtered = customers.filter(customer =>
       customer.name.toLowerCase().includes(customerSearchQuery.toLowerCase())
     );
+    
+    // Then sort by relevance
+    const searchLower = customerSearchQuery.toLowerCase();
+    return filtered.sort((a, b) => {
+      const aNameLower = a.name.toLowerCase();
+      const bNameLower = b.name.toLowerCase();
+      
+      // Exact match gets highest priority
+      if (aNameLower === searchLower && bNameLower !== searchLower) return -1;
+      if (bNameLower === searchLower && aNameLower !== searchLower) return 1;
+      
+      // Starts with gets second priority
+      if (aNameLower.startsWith(searchLower) && !bNameLower.startsWith(searchLower)) return -1;
+      if (bNameLower.startsWith(searchLower) && !aNameLower.startsWith(searchLower)) return 1;
+      
+      // If same level of match, sort alphabetically
+      return aNameLower.localeCompare(bNameLower);
+    });
   }, [customers, customerSearchQuery]);
 
   // Helper function for debouncing
@@ -1027,8 +1132,8 @@ function DailySales() {
           }}>
             {loading ? (
               <Typography sx={{ fontSize: 'calc(14px + 0.4vw)' }}>Loading...</Typography>
-            ) : filteredSales.length > 0 ? (
-              filteredSales.map((sale) => (
+            ) : sortedSales.length > 0 ? (
+              sortedSales.map((sale) => (
                 <Box 
                   key={sale.id} 
                   sx={{ 
@@ -1101,7 +1206,35 @@ function DailySales() {
           {/* Filter section */}
           <Paper sx={{ p: 2, mb: 3 }}>
             <Grid container spacing={2} alignItems="center">
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} md={12} lg={3}>
+                <TextField
+                  placeholder="Search sales..."
+                  value={searchTerm}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setPage(0); // Reset to first page when searching
+                  }}
+                  fullWidth
+                  size="small"
+                  InputProps={{
+                    startAdornment: (
+                      <Box component="span" sx={{ color: 'action.active', mr: 1 }}>
+                        🔍
+                      </Box>
+                    ),
+                    endAdornment: searchTerm && (
+                      <IconButton 
+                        size="small" 
+                        onClick={() => setSearchTerm('')}
+                        sx={{ visibility: searchTerm ? 'visible' : 'hidden' }}
+                      >
+                        <CancelIcon fontSize="small" />
+                      </IconButton>
+                    )
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4} lg={2}>
                 <LocalizationProvider dateAdapter={AdapterDayjs}>
                   <DatePicker
                     label="Start Date"
@@ -1117,7 +1250,7 @@ function DailySales() {
                   />
                 </LocalizationProvider>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={4} lg={2}>
                 <LocalizationProvider dateAdapter={AdapterDayjs}>
                   <DatePicker
                     label="End Date"
@@ -1133,7 +1266,7 @@ function DailySales() {
                   />
                 </LocalizationProvider>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={4} lg={2}>
                 <FormControl fullWidth size="small">
                   <InputLabel>Location</InputLabel>
                   <Select
@@ -1150,7 +1283,7 @@ function DailySales() {
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} sm={6} md={3}>
+              <Grid item xs={12} sm={6} md={4} lg={3}>
                 <FormControl fullWidth size="small">
                   <InputLabel>Quick Filter</InputLabel>
                   <Select
@@ -1186,7 +1319,7 @@ function DailySales() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {(loading ? Array(5).fill({}) : filteredSales).map((sale, index) => (
+                {(loading ? Array(5).fill({}) : sortedSales).map((sale, index) => (
                   <TableRow
                     key={sale.id || index}
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
@@ -1274,6 +1407,12 @@ function DailySales() {
                       loading={isLoadingCustomers}
                       filterOptions={(options) => options}
                       disableListWrap
+                      freeSolo
+                      openOnFocus
+                      blurOnSelect={false}
+                      clearOnBlur={false}
+                      selectOnFocus
+                      handleHomeEndKeys
                       componentsProps={{
                         popper: {
                           placement: 'bottom-start',

@@ -62,6 +62,7 @@ function CustomerList() {
   });
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState('all');
+  const [searchTerm, setSearchTerm] = useState('');
   const theme = useTheme();
 
   useEffect(() => {
@@ -269,15 +270,57 @@ function CustomerList() {
     }
   };
 
+  // Filter customers based on search term and type
   const filteredCustomers = customers.filter(customer => {
-    if (filterType === 'all') return true;
-    return customer.customer_type === filterType;
+    // First apply type filter
+    if (filterType !== 'all' && customer.customer_type !== filterType) {
+      return false;
+    }
+    
+    // Then apply search filter if search term exists
+    if (searchTerm.trim() !== '') {
+      const search = searchTerm.toLowerCase();
+      return (
+        (customer.name && customer.name.toLowerCase().includes(search)) ||
+        (customer.email && customer.email.toLowerCase().includes(search)) ||
+        (customer.phone && customer.phone.toLowerCase().includes(search)) ||
+        (customer.location && customer.location.toLowerCase().includes(search))
+      );
+    }
+    
+    return true;
   });
+  
+  // Sort customers based on search relevance if search term exists
+  const sortedCustomers = searchTerm.trim() !== '' 
+    ? [...filteredCustomers].sort((a, b) => {
+        const searchLower = searchTerm.toLowerCase();
+        const aNameLower = (a.name || '').toLowerCase();
+        const bNameLower = (b.name || '').toLowerCase();
+        
+        // Exact match gets highest priority
+        if (aNameLower === searchLower && bNameLower !== searchLower) return -1;
+        if (bNameLower === searchLower && aNameLower !== searchLower) return 1;
+        
+        // Starts with gets second priority
+        if (aNameLower.startsWith(searchLower) && !bNameLower.startsWith(searchLower)) return -1;
+        if (bNameLower.startsWith(searchLower) && !aNameLower.startsWith(searchLower)) return 1;
+        
+        // Contains gets third priority (already filtered for this)
+        // If same level of match, sort alphabetically
+        return aNameLower.localeCompare(bNameLower);
+      })
+    : filteredCustomers;
 
   useEffect(() => {
     console.log('Current editing id:', editedCustomer.id);
     console.log('Current edited customer:', editedCustomer);
   }, [editedCustomer]);
+  
+  // Reset to first page when filter type changes
+  useEffect(() => {
+    setPage(0);
+  }, [filterType]);
 
   return (
     <Box sx={{ width: '100%', maxWidth: 1200, mx: 'auto' }}>
@@ -290,19 +333,47 @@ function CustomerList() {
         <Typography variant="h4">
           Customers
         </Typography>
-        <FormControl sx={{ minWidth: 120 }}>
-          <InputLabel>Filter Type</InputLabel>
-          <Select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            label="Filter Type"
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <TextField
+            placeholder="Search customers..."
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setPage(0); // Reset to first page when searching
+            }}
             size="small"
-          >
-            <MenuItem value="all">All Customers</MenuItem>
-            <MenuItem value={CUSTOMER_TYPES.NEW}>New Customers</MenuItem>
-            <MenuItem value={CUSTOMER_TYPES.OLD}>Old Customers</MenuItem>
-          </Select>
-        </FormControl>
+            sx={{ minWidth: 200 }}
+            InputProps={{
+              startAdornment: (
+                <Box component="span" sx={{ color: 'action.active', mr: 1 }}>
+                  🔍
+                </Box>
+              ),
+              endAdornment: searchTerm && (
+                <IconButton 
+                  size="small" 
+                  onClick={() => setSearchTerm('')}
+                  sx={{ visibility: searchTerm ? 'visible' : 'hidden' }}
+                >
+                  <CancelIcon fontSize="small" />
+                </IconButton>
+              )
+            }}
+          />
+          <FormControl sx={{ minWidth: 120 }}>
+            <InputLabel>Filter Type</InputLabel>
+            <Select
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              label="Filter Type"
+              size="small"
+            >
+              <MenuItem value="all">All Customers</MenuItem>
+              <MenuItem value={CUSTOMER_TYPES.NEW}>New Customers</MenuItem>
+              <MenuItem value={CUSTOMER_TYPES.OLD}>Old Customers</MenuItem>
+            </Select>
+          </FormControl>
+        </Box>
       </Box>
       
       <Paper elevation={3} sx={{ width: '100%', overflow: 'hidden', backgroundColor: 'background.paper', borderRadius: 2 }}>
@@ -342,7 +413,7 @@ function CustomerList() {
                   <TableCell colSpan={8} align="center">Loading...</TableCell>
                 </TableRow>
               ) : (
-                filteredCustomers
+                sortedCustomers
                   .slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
                   .map((customer) => (
                     <TableRow key={customer.id} hover>
@@ -382,7 +453,7 @@ function CustomerList() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50]}
           component="div"
-          count={filteredCustomers.length}
+          count={sortedCustomers.length}
           rowsPerPage={rowsPerPage}
           page={page}
           onPageChange={(e, newPage) => setPage(newPage)}
