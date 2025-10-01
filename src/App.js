@@ -6,6 +6,7 @@ import { Box, AppBar, Toolbar, Typography, Button } from '@mui/material';
 import Navigation from './components/Navigation';
 import Dashboard from './components/Dashboard';
 import DailySales from './components/DailySales';
+import QuickSalesEntry from './components/QuickSalesEntry';
 import CustomerList from './components/CustomerList';
 import Products from './components/Products';
 import DeliveryCompanies from './components/DeliveryCompanies';
@@ -54,6 +55,7 @@ function AppContent() {
                       <Routes>
                         <Route path="/" element={<Dashboard />} />
                         <Route path="/sales" element={<DailySales />} />
+                        <Route path="/quick-entry" element={<QuickSalesEntry />} />
                         <Route path="/customers" element={<CustomerList />} />
                         <Route path="/products" element={<Products />} />
                         <Route path="/delivery-companies" element={<DeliveryCompanies />} />

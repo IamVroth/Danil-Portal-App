@@ -30,6 +30,7 @@ import {
   LocalShipping as LocalShippingIcon,
   ReceiptLong as ReceiptLongIcon,
   ShoppingCart as ShoppingCartIcon,
+  FlashOn as FlashOnIcon,
 } from '@mui/icons-material';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useThemeContext } from '../contexts/ThemeContext';
@@ -62,6 +63,7 @@ const Navigation = () => {
   const menuItems = [
     { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
     { text: 'Daily Sales', icon: <SaleIcon />, path: '/sales' },
+    { text: 'Quick Entry', icon: <FlashOnIcon />, path: '/quick-entry' },
     { text: 'Customers', icon: <PeopleIcon />, path: '/customers' },
     { text: 'Products', icon: <ProductsIcon />, path: '/products' },
     { text: 'Delivery Companies', icon: <LocalShippingIcon />, path: '/delivery-companies' },
