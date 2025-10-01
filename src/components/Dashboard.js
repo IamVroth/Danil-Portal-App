@@ -158,20 +158,44 @@ function Dashboard() {
       });
       
       // Fetch sales data for the selected date range
-      const { data: salesData, error: salesError } = await supabase
-        .from('sales')
-        .select(`
-          *,
-          customers (
-            name
-          ),
-          products (
-            name
-          )
-        `)
-        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
-        .lte('date', dateRange.endDate.format('YYYY-MM-DD'))
-        .order('date');
+      // Fetch all records by setting a high limit or using pagination
+      let salesData = [];
+      let salesPage = 0;
+      const salesPageSize = 1000;
+      let salesHasMore = true;
+      
+      while (salesHasMore) {
+        const { data, error } = await supabase
+          .from('sales')
+          .select(`
+            *,
+            customers (
+              name
+            ),
+            products (
+              name
+            )
+          `)
+          .gte('date', displayedDateRange.startDate.format('YYYY-MM-DD'))
+          .lte('date', displayedDateRange.endDate.format('YYYY-MM-DD'))
+          .order('date')
+          .range(salesPage * salesPageSize, (salesPage + 1) * salesPageSize - 1);
+        
+        if (error) {
+          console.error('Error fetching sales data:', error);
+          break;
+        }
+        
+        if (data && data.length > 0) {
+          salesData = [...salesData, ...data];
+          salesPage++;
+          salesHasMore = data.length === salesPageSize;
+        } else {
+          salesHasMore = false;
+        }
+      }
+      
+      const salesError = null;
 
       if (salesError) throw salesError;
 
@@ -212,6 +236,11 @@ function Dashboard() {
           sales: Number(sales.toFixed(2))
         }))
         .sort((a, b) => dayjs(a.month, 'MMM YYYY').valueOf() - dayjs(b.month, 'MMM YYYY').valueOf());
+
+      console.log('Sales data count:', salesData.length);
+      console.log('Date range:', displayedDateRange.startDate.format('YYYY-MM-DD'), 'to', displayedDateRange.endDate.format('YYYY-MM-DD'));
+      console.log('Monthly sales data:', processedMonthlySales);
+      console.log('Unique months in raw data:', [...new Set(salesData.map(s => dayjs(s.date).format('MMM YYYY')))]);
 
       // Calculate customer statistics
       const customerStats = salesData.reduce((acc, sale) => {
@@ -278,7 +307,7 @@ function Dashboard() {
 
       // Count new vs returning customers
       const newCustomers = allCustomers.filter(c => 
-        dayjs(c.created_at).isAfter(dateRange.startDate)
+        dayjs(c.created_at).isAfter(displayedDateRange.startDate)
       ).length;
 
       setCustomerStats({
@@ -314,8 +343,8 @@ function Dashboard() {
           )
         `)
         .not('delivery_cost', 'is', null)
-        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
-        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+        .gte('date', displayedDateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', displayedDateRange.endDate.format('YYYY-MM-DD'));
 
       if (deliveryError) throw deliveryError;
 
@@ -342,8 +371,8 @@ function Dashboard() {
       const { data: expensesData, error: expensesError } = await supabase
         .from('expenses')
         .select('amount, date')
-        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
-        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+        .gte('date', displayedDateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', displayedDateRange.endDate.format('YYYY-MM-DD'));
 
       if (expensesError) throw expensesError;
 
@@ -351,8 +380,8 @@ function Dashboard() {
       const { data: purchasesData, error: purchasesError } = await supabase
         .from('purchases')
         .select('total_amount, date')
-        .gte('date', dateRange.startDate.format('YYYY-MM-DD'))
-        .lte('date', dateRange.endDate.format('YYYY-MM-DD'));
+        .gte('date', displayedDateRange.startDate.format('YYYY-MM-DD'))
+        .lte('date', displayedDateRange.endDate.format('YYYY-MM-DD'));
 
       if (purchasesError) throw purchasesError;
 
@@ -379,8 +408,8 @@ function Dashboard() {
 
       // Calculate percentage change from previous period based on the exact same date range
       // Calculate the duration of the selected period in days
-      const selectedStartDate = dateRange.startDate;
-      const selectedEndDate = dateRange.endDate;
+      const selectedStartDate = displayedDateRange.startDate;
+      const selectedEndDate = displayedDateRange.endDate;
       const durationInDays = selectedEndDate.diff(selectedStartDate, 'day') + 1;
       
       // Calculate the previous period with the same duration
@@ -767,35 +796,51 @@ function Dashboard() {
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12}>
-          <Card sx={{ 
-            p: 3,
+          <Paper sx={{ 
+            p: { xs: 1.5, sm: 2 },
             mx: { xs: '10px', sm: 0 },
             maxWidth: { xs: 'calc(100% - 20px)', sm: 'none' } 
           }}>
-            <Typography variant="h6" sx={{ mb: 3 }}>Monthly Sales Overview</Typography>
-            <Grid container spacing={2}>
-              {monthlySalesData.map((month, index) => (
-                <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
-                  <Card 
-                    elevation={2}
-                    sx={{ 
-                      p: 2,
-                      background: theme.palette.mode === 'dark' 
-                        ? 'linear-gradient(45deg, #1a237e 30%, #283593 90%)'
-                        : 'linear-gradient(45deg, #42a5f5 30%, #64b5f6 90%)',
-                      color: 'white'
-                    }}
-                  >
-                    <Typography variant="h6" sx={{ mb: 1 }}>{month.month}</Typography>
-                    <Typography variant="h4">${month.sales.toLocaleString(undefined, {
+            <Typography variant="h6" gutterBottom>
+              Monthly Sales Overview
+            </Typography>
+            <Box sx={{ width: '100%', height: 400 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={monthlySalesData}
+                  margin={{
+                    top: 5,
+                    right: 30,
+                    left: 20,
+                    bottom: 5,
+                  }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis 
+                    dataKey="month"
+                    angle={-45}
+                    textAnchor="end"
+                    height={100}
+                  />
+                  <YAxis 
+                    tickFormatter={(value) => `$${value.toLocaleString()}`}
+                  />
+                  <Tooltip 
+                    formatter={(value) => [`$${value.toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2
-                    })}</Typography>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          </Card>
+                    })}`, 'Income']}
+                  />
+                  <Legend />
+                  <Bar 
+                    dataKey="sales" 
+                    name="Monthly Income ($)" 
+                    fill={theme.palette.mode === 'dark' ? '#42a5f5' : '#1976d2'}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </Box>
+          </Paper>
         </Grid>
       </Grid>
 
