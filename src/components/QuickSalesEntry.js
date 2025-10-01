@@ -36,6 +36,7 @@ import {
   Upload as UploadIcon,
   Download as DownloadIcon,
   Clear as ClearIcon,
+  PersonAdd as PersonAddIcon,
 } from '@mui/icons-material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
@@ -55,6 +56,14 @@ const QuickSalesEntry = () => {
   const [csvFile, setCsvFile] = useState(null);
   const [csvPreview, setCsvPreview] = useState([]);
   const [csvErrors, setCsvErrors] = useState([]);
+  const [quickAddCustomerDialog, setQuickAddCustomerDialog] = useState({
+    open: false,
+    name: '',
+    phone: '',
+    location: '',
+    email: '',
+    rowIndex: null,
+  });
   
   const firstInputRef = useRef(null);
 
@@ -158,7 +167,13 @@ const QuickSalesEntry = () => {
 
   // Add new row
   const addRow = () => {
-    setRows([...rows, createEmptyRow(rows.length)]);
+    const lastRow = rows[rows.length - 1];
+    const newRow = createEmptyRow(rows.length);
+    // Copy date from the last row
+    if (lastRow) {
+      newRow.date = lastRow.date;
+    }
+    setRows([...rows, newRow]);
   };
 
   // Delete row
@@ -265,7 +280,7 @@ const QuickSalesEntry = () => {
           discount_type: row.discount_type,
           discount_value: row.discount_type ? (parseFloat(row.discount_value) || 0) : 0,
           has_delivery: row.has_delivery,
-          delivery_company_id: row.has_delivery && row.delivery_company ? row.delivery_company.id : null,
+          delivery_company: row.has_delivery && row.delivery_company ? row.delivery_company.id : null,
           delivery_charge: row.has_delivery ? (parseFloat(row.delivery_charge) || 0) : 0,
           delivery_cost: row.has_delivery ? (parseFloat(row.delivery_cost) || 0) : 0,
           delivery_status: row.has_delivery ? row.delivery_status : null,
@@ -283,8 +298,11 @@ const QuickSalesEntry = () => {
 
       showSnackbar(`Successfully saved ${data.length} sale(s)!`, 'success');
       
-      // Reset to single empty row
-      setRows([createEmptyRow()]);
+      // Reset to single empty row but keep the date from last entry
+      const lastDate = rows[rows.length - 1]?.date || dayjs();
+      const newRow = createEmptyRow();
+      newRow.date = lastDate;
+      setRows([newRow]);
       
       // Focus first input
       setTimeout(() => {
@@ -406,6 +424,62 @@ const QuickSalesEntry = () => {
     setCsvDialogOpen(true);
   };
 
+  // Quick add customer
+  const handleOpenQuickAddCustomer = (rowIndex) => {
+    setQuickAddCustomerDialog({
+      open: true,
+      name: '',
+      phone: '',
+      location: '',
+      email: '',
+      rowIndex,
+    });
+  };
+
+  const handleQuickAddCustomer = async () => {
+    try {
+      const { name, phone, location, email, rowIndex } = quickAddCustomerDialog;
+      
+      if (!name || !phone) {
+        showSnackbar('Name and phone are required', 'error');
+        return;
+      }
+
+      setLoading(true);
+
+      const { data, error } = await supabase
+        .from('customers')
+        .insert([{ name, phone, location, email }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Add to customers list
+      setCustomers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      
+      // Auto-select the new customer in the row
+      if (rowIndex !== null) {
+        updateRow(rowIndex, 'customer', data);
+      }
+
+      showSnackbar('Customer added successfully!', 'success');
+      setQuickAddCustomerDialog({
+        open: false,
+        name: '',
+        phone: '',
+        location: '',
+        email: '',
+        rowIndex: null,
+      });
+    } catch (error) {
+      console.error('Error adding customer:', error);
+      showSnackbar('Error adding customer: ' + error.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Import CSV data
   const importCsvData = async () => {
     if (csvErrors.length > 0) {
@@ -455,7 +529,7 @@ const QuickSalesEntry = () => {
           discount_type: row.discountType || null,
           discount_value: row.discountValue ? parseFloat(row.discountValue) : 0,
           has_delivery: row.hasDelivery === 'true',
-          delivery_company_id: deliveryCompanyId,
+          delivery_company: deliveryCompanyId,
           delivery_charge: row.deliveryCharge ? parseFloat(row.deliveryCharge) : 0,
           delivery_cost: row.deliveryCost ? parseFloat(row.deliveryCost) : 0,
           delivery_status: row.deliveryStatus || 'pending',
@@ -580,7 +654,8 @@ const QuickSalesEntry = () => {
                   <TableCell sx={{ minWidth: 100 }}>Qty *</TableCell>
                   <TableCell sx={{ minWidth: 120 }}>Price *</TableCell>
                   <TableCell sx={{ minWidth: 120 }}>Discount</TableCell>
-                  <TableCell sx={{ minWidth: 100 }}>Delivery</TableCell>
+                  <TableCell sx={{ minWidth: 100 }}>Has Delivery</TableCell>
+                  <TableCell sx={{ minWidth: 180 }}>Delivery Details</TableCell>
                   <TableCell sx={{ minWidth: 120 }}>Total</TableCell>
                   <TableCell sx={{ minWidth: 150 }}>Actions</TableCell>
                 </TableRow>
@@ -607,42 +682,54 @@ const QuickSalesEntry = () => {
 
                     {/* Customer */}
                     <TableCell>
-                      <Autocomplete
-                        value={row.customer}
-                        onChange={(e, newValue) => updateRow(index, 'customer', newValue)}
-                        options={customers}
-                        getOptionLabel={(option) => option.name || ''}
-                        filterOptions={(options, { inputValue }) => {
-                          if (!inputValue) return options;
-                          const searchTerm = inputValue.toLowerCase();
-                          return options.filter(option => 
-                            option.name?.toLowerCase().includes(searchTerm) ||
-                            option.phone?.includes(inputValue) ||
-                            option.location?.toLowerCase().includes(searchTerm)
-                          );
-                        }}
-                        renderOption={(props, option) => (
-                          <li {...props} key={option.id}>
-                            <Box>
-                              <Typography variant="body2">{option.name}</Typography>
-                              {option.phone && (
-                                <Typography variant="caption" color="text.secondary">
-                                  {option.phone}
-                                </Typography>
-                              )}
-                            </Box>
-                          </li>
-                        )}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
+                      <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                        <Autocomplete
+                          value={row.customer}
+                          onChange={(e, newValue) => updateRow(index, 'customer', newValue)}
+                          options={customers}
+                          getOptionLabel={(option) => option.name || ''}
+                          filterOptions={(options, { inputValue }) => {
+                            if (!inputValue) return options;
+                            const searchTerm = inputValue.toLowerCase();
+                            return options.filter(option => 
+                              option.name?.toLowerCase().includes(searchTerm) ||
+                              option.phone?.includes(inputValue) ||
+                              option.location?.toLowerCase().includes(searchTerm)
+                            );
+                          }}
+                          renderOption={(props, option) => (
+                            <li {...props} key={option.id}>
+                              <Box>
+                                <Typography variant="body2">{option.name}</Typography>
+                                {option.phone && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    {option.phone}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </li>
+                          )}
+                          renderInput={(params) => (
+                            <TextField
+                              {...params}
+                              size="small"
+                              placeholder="Search customer"
+                              error={!row.customer}
+                            />
+                          )}
+                          isOptionEqualToValue={(option, value) => option.id === value?.id}
+                          sx={{ flexGrow: 1 }}
+                        />
+                        <Tooltip title="Add New Customer">
+                          <IconButton
                             size="small"
-                            placeholder="Search customer"
-                            error={!row.customer}
-                          />
-                        )}
-                        isOptionEqualToValue={(option, value) => option.id === value?.id}
-                      />
+                            color="primary"
+                            onClick={() => handleOpenQuickAddCustomer(index)}
+                          >
+                            <PersonAddIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
                     </TableCell>
 
                     {/* Product */}
@@ -739,7 +826,7 @@ const QuickSalesEntry = () => {
                       </Stack>
                     </TableCell>
 
-                    {/* Delivery */}
+                    {/* Has Delivery */}
                     <TableCell>
                       <FormControlLabel
                         control={
@@ -751,6 +838,54 @@ const QuickSalesEntry = () => {
                         }
                         label=""
                       />
+                    </TableCell>
+
+                    {/* Delivery Details */}
+                    <TableCell>
+                      {row.has_delivery && (
+                        <Stack direction="column" spacing={1}>
+                          <Autocomplete
+                            value={row.delivery_company}
+                            onChange={(e, newValue) => updateRow(index, 'delivery_company', newValue)}
+                            options={deliveryCompanies}
+                            getOptionLabel={(option) => option.name || ''}
+                            size="small"
+                            renderInput={(params) => (
+                              <TextField
+                                {...params}
+                                size="small"
+                                placeholder="Company"
+                                sx={{ minWidth: 150 }}
+                              />
+                            )}
+                            isOptionEqualToValue={(option, value) => option.id === value?.id}
+                          />
+                          <Stack direction="row" spacing={0.5}>
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={row.delivery_charge}
+                              onChange={(e) => updateRow(index, 'delivery_charge', e.target.value)}
+                              placeholder="Charge"
+                              InputProps={{
+                                startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              }}
+                              sx={{ width: 85 }}
+                            />
+                            <TextField
+                              type="number"
+                              size="small"
+                              value={row.delivery_cost}
+                              onChange={(e) => updateRow(index, 'delivery_cost', e.target.value)}
+                              placeholder="Cost"
+                              InputProps={{
+                                startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                              }}
+                              sx={{ width: 85 }}
+                            />
+                          </Stack>
+                        </Stack>
+                      )}
                     </TableCell>
 
                     {/* Total */}
@@ -795,6 +930,58 @@ const QuickSalesEntry = () => {
             </Typography>
           </Box>
         </Paper>
+
+        {/* Quick Add Customer Dialog */}
+        <Dialog
+          open={quickAddCustomerDialog.open}
+          onClose={() => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, open: false })}
+          maxWidth="sm"
+          fullWidth
+        >
+          <DialogTitle>Add New Customer</DialogTitle>
+          <DialogContent>
+            <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <TextField
+                label="Customer Name *"
+                value={quickAddCustomerDialog.name}
+                onChange={(e) => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, name: e.target.value })}
+                fullWidth
+                autoFocus
+              />
+              <TextField
+                label="Phone Number *"
+                value={quickAddCustomerDialog.phone}
+                onChange={(e) => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, phone: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                label="Location"
+                value={quickAddCustomerDialog.location}
+                onChange={(e) => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, location: e.target.value })}
+                fullWidth
+              />
+              <TextField
+                label="Email"
+                type="email"
+                value={quickAddCustomerDialog.email}
+                onChange={(e) => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, email: e.target.value })}
+                fullWidth
+              />
+            </Box>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setQuickAddCustomerDialog({ ...quickAddCustomerDialog, open: false })}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleQuickAddCustomer}
+              disabled={loading || !quickAddCustomerDialog.name || !quickAddCustomerDialog.phone}
+            >
+              {loading ? <CircularProgress size={24} /> : 'Add Customer'}
+            </Button>
+          </DialogActions>
+        </Dialog>
 
         {/* CSV Import Dialog */}
         <Dialog open={csvDialogOpen} onClose={() => setCsvDialogOpen(false)} maxWidth="lg" fullWidth>
