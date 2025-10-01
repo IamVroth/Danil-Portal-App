@@ -26,8 +26,7 @@ import {
   FormControlLabel,
   Switch,
   InputAdornment,
-  Tabs,
-  Tab,
+  MenuItem,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -89,12 +88,31 @@ const QuickSalesEntry = () => {
 
   const fetchCustomers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('customers')
-        .select('*')
-        .order('name');
-      if (error) throw error;
-      setCustomers(data || []);
+      // Fetch all customers with pagination to avoid 1000 row limit
+      let allCustomers = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
+      
+      while (hasMore) {
+        const { data, error } = await supabase
+          .from('customers')
+          .select('*')
+          .order('name')
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+        
+        if (error) throw error;
+        
+        if (data && data.length > 0) {
+          allCustomers = [...allCustomers, ...data];
+          page++;
+          hasMore = data.length === pageSize;
+        } else {
+          hasMore = false;
+        }
+      }
+      
+      setCustomers(allCustomers);
     } catch (error) {
       console.error('Error fetching customers:', error);
       showSnackbar('Error loading customers', 'error');
@@ -594,11 +612,32 @@ const QuickSalesEntry = () => {
                         onChange={(e, newValue) => updateRow(index, 'customer', newValue)}
                         options={customers}
                         getOptionLabel={(option) => option.name || ''}
+                        filterOptions={(options, { inputValue }) => {
+                          if (!inputValue) return options;
+                          const searchTerm = inputValue.toLowerCase();
+                          return options.filter(option => 
+                            option.name?.toLowerCase().includes(searchTerm) ||
+                            option.phone?.includes(inputValue) ||
+                            option.location?.toLowerCase().includes(searchTerm)
+                          );
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} key={option.id}>
+                            <Box>
+                              <Typography variant="body2">{option.name}</Typography>
+                              {option.phone && (
+                                <Typography variant="caption" color="text.secondary">
+                                  {option.phone}
+                                </Typography>
+                              )}
+                            </Box>
+                          </li>
+                        )}
                         renderInput={(params) => (
                           <TextField
                             {...params}
                             size="small"
-                            placeholder="Select customer"
+                            placeholder="Search customer"
                             error={!row.customer}
                           />
                         )}
@@ -613,11 +652,31 @@ const QuickSalesEntry = () => {
                         onChange={(e, newValue) => updateRow(index, 'product', newValue)}
                         options={products}
                         getOptionLabel={(option) => option.name || ''}
+                        filterOptions={(options, { inputValue }) => {
+                          if (!inputValue) return options;
+                          const searchTerm = inputValue.toLowerCase();
+                          return options.filter(option => 
+                            option.name?.toLowerCase().includes(searchTerm) ||
+                            option.description?.toLowerCase().includes(searchTerm)
+                          );
+                        }}
+                        renderOption={(props, option) => (
+                          <li {...props} key={option.id}>
+                            <Box>
+                              <Typography variant="body2">{option.name}</Typography>
+                              {option.unit_price && (
+                                <Typography variant="caption" color="text.secondary">
+                                  ${option.unit_price}
+                                </Typography>
+                              )}
+                            </Box>
+                          </li>
+                        )}
                         renderInput={(params) => (
                           <TextField
                             {...params}
                             size="small"
-                            placeholder="Select product"
+                            placeholder="Search product"
                             error={!row.product}
                           />
                         )}

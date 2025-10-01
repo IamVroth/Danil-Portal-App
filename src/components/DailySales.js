@@ -31,6 +31,9 @@ import {
   Autocomplete,
   ListSubheader,
   CircularProgress,
+  Checkbox,
+  Toolbar,
+  Chip,
 } from '@mui/material';
 import {
   AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
@@ -149,6 +152,13 @@ function DailySales() {
   const [selectedSale, setSelectedSale] = useState(null);
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  
+  // Bulk update states
+  const [selectedRows, setSelectedRows] = useState([]);
+  const [bulkUpdateDialog, setBulkUpdateDialog] = useState({
+    open: false,
+    newDate: dayjs(),
+  });
   
   const isMobile = useMediaQuery('(max-width:600px)');
   const theme = useTheme();
@@ -546,6 +556,58 @@ function DailySales() {
 
   const showSnackbar = (message, severity = 'success') => {
     setSnackbar({ open: true, message, severity });
+  };
+
+  // Bulk update functions
+  const handleSelectAll = (event) => {
+    if (event.target.checked) {
+      const allIds = sortedSales.map(sale => sale.id);
+      setSelectedRows(allIds);
+    } else {
+      setSelectedRows([]);
+    }
+  };
+
+  const handleSelectRow = (saleId) => {
+    setSelectedRows(prev => {
+      if (prev.includes(saleId)) {
+        return prev.filter(id => id !== saleId);
+      } else {
+        return [...prev, saleId];
+      }
+    });
+  };
+
+  const handleOpenBulkUpdate = () => {
+    if (selectedRows.length === 0) {
+      showSnackbar('Please select at least one row', 'warning');
+      return;
+    }
+    setBulkUpdateDialog({ open: true, newDate: dayjs() });
+  };
+
+  const handleBulkDateUpdate = async () => {
+    try {
+      setLoading(true);
+      const newDateStr = bulkUpdateDialog.newDate.format('YYYY-MM-DD');
+      
+      const { error } = await supabase
+        .from('sales')
+        .update({ date: newDateStr })
+        .in('id', selectedRows);
+
+      if (error) throw error;
+
+      showSnackbar(`Successfully updated ${selectedRows.length} sale(s)`, 'success');
+      setSelectedRows([]);
+      setBulkUpdateDialog({ open: false, newDate: dayjs() });
+      memoizedFetchSales();
+    } catch (error) {
+      console.error('Error updating dates:', error);
+      showSnackbar('Error updating dates: ' + error.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCloseSnackbar = () => {
@@ -1302,11 +1364,42 @@ function DailySales() {
             </Grid>
           </Paper>
 
+          {/* Bulk Actions Toolbar */}
+          {selectedRows.length > 0 && (
+            <Paper sx={{ mt: 3, p: 2 }}>
+              <Toolbar sx={{ pl: { sm: 2 }, pr: { xs: 1, sm: 1 } }}>
+                <Typography
+                  sx={{ flex: '1 1 100%' }}
+                  color="inherit"
+                  variant="subtitle1"
+                  component="div"
+                >
+                  {selectedRows.length} selected
+                </Typography>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  onClick={handleOpenBulkUpdate}
+                  startIcon={<EditIcon />}
+                >
+                  Update Date
+                </Button>
+              </Toolbar>
+            </Paper>
+          )}
+
           {/* Desktop View Table */}
           <TableContainer component={Paper} sx={{ mt: 3 }}>
             <Table>
               <TableHead>
                 <TableRow>
+                  <TableCell padding="checkbox">
+                    <Checkbox
+                      indeterminate={selectedRows.length > 0 && selectedRows.length < sortedSales.length}
+                      checked={sortedSales.length > 0 && selectedRows.length === sortedSales.length}
+                      onChange={handleSelectAll}
+                    />
+                  </TableCell>
                   <TableCell>Date</TableCell>
                   <TableCell>Customer</TableCell>
                   <TableCell>Location</TableCell>
@@ -1323,7 +1416,16 @@ function DailySales() {
                   <TableRow
                     key={sale.id || index}
                     sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                    selected={selectedRows.includes(sale.id)}
                   >
+                    <TableCell padding="checkbox">
+                      {!loading && (
+                        <Checkbox
+                          checked={selectedRows.includes(sale.id)}
+                          onChange={() => handleSelectRow(sale.id)}
+                        />
+                      )}
+                    </TableCell>
                     <TableCell>{loading ? 'Loading...' : dayjs(sale.date).format('DD/MM/YYYY')}</TableCell>
                     <TableCell>{loading ? 'Loading...' : sale.customers?.name || 'N/A'}</TableCell>
                     <TableCell>{loading ? 'Loading...' : sale.customers?.location || 'N/A'}</TableCell>
@@ -2085,6 +2187,52 @@ function DailySales() {
             </DialogContent>
           </>
         )}
+      </Dialog>
+
+      {/* Bulk Date Update Dialog */}
+      <Dialog
+        open={bulkUpdateDialog.open}
+        onClose={() => setBulkUpdateDialog({ ...bulkUpdateDialog, open: false })}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Bulk Update Date</DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2 }}>
+            <Alert severity="info" sx={{ mb: 3 }}>
+              You are about to update the date for {selectedRows.length} sale(s).
+            </Alert>
+            <LocalizationProvider dateAdapter={AdapterDayjs}>
+              <DatePicker
+                label="New Date"
+                value={bulkUpdateDialog.newDate}
+                onChange={(newValue) => 
+                  setBulkUpdateDialog({ ...bulkUpdateDialog, newDate: newValue })
+                }
+                slotProps={{
+                  textField: {
+                    fullWidth: true,
+                  }
+                }}
+              />
+            </LocalizationProvider>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => setBulkUpdateDialog({ ...bulkUpdateDialog, open: false })}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleBulkDateUpdate}
+            variant="contained"
+            color="primary"
+            disabled={loading}
+          >
+            {loading ? <CircularProgress size={24} /> : 'Update'}
+          </Button>
+        </DialogActions>
       </Dialog>
 
       <Snackbar
